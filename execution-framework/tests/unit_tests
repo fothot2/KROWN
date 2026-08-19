@@ -6,6 +6,8 @@ import unittest
 import filecmp
 import subprocess
 import tempfile
+import json
+import hashlib
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 import requests
@@ -24,6 +26,9 @@ from bench_executor.stats import Stats, METRICS_AGGREGATED_FILE_NAME, \
         METRICS_SUMMARY_FILE_NAME  # noqa: E402
 from bench_executor.executor import Executor, \
         _declared_artifact_path, _move_declared_artifact  # noqa: E402
+from bench_executor.benchmark_result import SCHEMA_VERSION, \
+        sha256_file, sha256_text, validate_query_record, \
+        write_query_records_atomic  # noqa: E402
 
 LOG_DIR = os.path.join(os.path.dirname(__file__), '..', 'bench_executor',
                        'log')
@@ -35,6 +40,118 @@ CASE_INFO_FILE_NAME = 'case-info.txt'
 
 
 class UnitTests(unittest.TestCase):
+    @staticmethod
+    def _benchmark_record(**changes):
+        record = {
+            'schema_version': SCHEMA_VERSION,
+            'experiment_id': 'dbbench-tp',
+            'system': 'vortex-rdf-v10',
+            'dataset': 'dbpedia',
+            'workload': 'triple-patterns',
+            'query_id': 'TP_D::q0001',
+            'phase': 'measured',
+            'run': 0,
+            'order': 17,
+            'status': 'ok',
+            'elapsed_ns': 21690000,
+            'result_count': 4,
+        }
+        record.update(changes)
+        return record
+
+    def test_benchmark_record_accepts_valid_record(self):
+        record = self._benchmark_record()
+
+        validated = validate_query_record(record)
+
+        self.assertEqual(validated, record)
+        self.assertIsNot(validated, record)
+
+    def test_benchmark_record_rejects_missing_field(self):
+        record = self._benchmark_record()
+        del record['query_id']
+
+        with self.assertRaisesRegex(ValueError, 'query_id'):
+            validate_query_record(record)
+
+    def test_benchmark_record_rejects_unknown_status(self):
+        with self.assertRaisesRegex(ValueError, 'Unsupported status'):
+            validate_query_record(
+                self._benchmark_record(status='unknown')
+            )
+
+    def test_benchmark_record_rejects_invalid_elapsed_time(self):
+        with self.assertRaisesRegex(ValueError, 'elapsed_ns'):
+            validate_query_record(
+                self._benchmark_record(elapsed_ns=-1)
+            )
+
+    def test_benchmark_record_allows_null_time_for_skipped_query(self):
+        record = self._benchmark_record(
+            status='skipped', elapsed_ns=None, result_count=None
+        )
+
+        self.assertEqual(validate_query_record(record), record)
+
+    def test_benchmark_hash_helpers(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, 'query.rq')
+            with open(path, 'wb') as stream:
+                stream.write(b'SELECT * WHERE { ?s ?p ?o }')
+            expected = hashlib.sha256(
+                b'SELECT * WHERE { ?s ?p ?o }'
+            ).hexdigest()
+
+            self.assertEqual(
+                sha256_text('SELECT * WHERE { ?s ?p ?o }'), expected
+            )
+            self.assertEqual(sha256_file(path), expected)
+
+    def test_benchmark_writer_replaces_file_atomically(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, 'raw', 'queries.jsonl')
+            os.makedirs(os.path.dirname(path))
+            with open(path, 'w', encoding='utf-8') as stream:
+                stream.write('old data\n')
+
+            count = write_query_records_atomic(
+                path,
+                [
+                    self._benchmark_record(),
+                    self._benchmark_record(
+                        query_id='TP_D::q0002', order=18,
+                        status='skipped', elapsed_ns=None,
+                        result_count=None,
+                    ),
+                ],
+            )
+
+            self.assertEqual(count, 2)
+            with open(path, 'r', encoding='utf-8') as stream:
+                records = [json.loads(line) for line in stream]
+            self.assertEqual(len(records), 2)
+            self.assertEqual(records[1]['query_id'], 'TP_D::q0002')
+
+    def test_benchmark_writer_keeps_old_file_after_invalid_record(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, 'queries.jsonl')
+            with open(path, 'w', encoding='utf-8') as stream:
+                stream.write('old data\n')
+
+            with self.assertRaises(ValueError):
+                write_query_records_atomic(
+                    path,
+                    [self._benchmark_record(status='invalid')],
+                )
+
+            with open(path, 'r', encoding='utf-8') as stream:
+                self.assertEqual(stream.read(), 'old data\n')
+            temporary_files = [
+                name for name in os.listdir(directory)
+                if name.endswith('.tmp')
+            ]
+            self.assertEqual(temporary_files, [])
+
     def test_executor_retains_may_fail_step_failure(self):
         class FakeResource:
             def __init__(self, data_path, config_dir, log_dir, verbose):
