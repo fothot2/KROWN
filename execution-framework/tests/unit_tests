@@ -33,7 +33,7 @@ from bench_executor.rdf_query_benchmark import _load_query_manifest, \
         _QueryOutcome, _QueryTimeoutError, _RdfQueryAdapter, \
         _RdfQueryBenchmark  # noqa: E402
 from bench_executor.rdflib_query_benchmark import _resolve_input_path, \
-        _resolve_output_path, _RdfLibAdapter, \
+        _resolve_output_path, _RdfLibAdapter, _WorkerRdfLibAdapter, \
         RdfLibQueryBenchmark  # noqa: E402
 
 LOG_DIR = os.path.join(os.path.dirname(__file__), '..', 'bench_executor',
@@ -46,6 +46,95 @@ CASE_INFO_FILE_NAME = 'case-info.txt'
 
 
 class UnitTests(unittest.TestCase):
+    def test_rdflib_worker_reports_hard_timeout(self):
+        class FakeConnection:
+            def __init__(self):
+                self.sent = []
+                self.closed = False
+
+            def send(self, message):
+                self.sent.append(message)
+
+            def poll(self, timeout):
+                return False
+
+            def close(self):
+                self.closed = True
+
+        class FakeProcess:
+            pid = 12345
+            exitcode = None
+
+            def is_alive(self):
+                return True
+
+            def join(self, timeout=None):
+                pass
+
+        adapter = _WorkerRdfLibAdapter(
+            engine='vortex',
+            artifact_path='/tmp/data.vortex',
+            vortex_layout='cottas-native-ids',
+            timeout_s=0.01,
+            startup_timeout_s=1.0,
+            kill_grace_s=0.0,
+        )
+        connection = FakeConnection()
+        process = FakeProcess()
+        adapter._connection = connection
+        adapter._process = process
+
+        with patch(
+                'bench_executor.rdflib_query_benchmark.'
+                '_terminate_process_tree') as terminate:
+            with self.assertRaisesRegex(_QueryTimeoutError, '0.01s'):
+                adapter.execute('SELECT * WHERE { ?s ?p ?o }')
+
+        terminate.assert_called_once_with(12345, 0.0)
+        self.assertIsNone(adapter._connection)
+        self.assertIsNone(adapter._process)
+        self.assertTrue(connection.closed)
+
+    def test_rdflib_worker_returns_result_count(self):
+        class FakeConnection:
+            def send(self, message):
+                self.request = message
+
+            def poll(self, timeout):
+                return True
+
+            def recv(self):
+                return {
+                    'kind': 'result',
+                    'request_id': self.request['request_id'],
+                    'status': 'ok',
+                    'result_count': 7,
+                }
+
+            def close(self):
+                pass
+
+        class FakeProcess:
+            exitcode = 0
+
+            def is_alive(self):
+                return True
+
+        adapter = _WorkerRdfLibAdapter(
+            engine='cottas',
+            artifact_path='/tmp/data.cottas',
+            vortex_layout='unused',
+            timeout_s=1.0,
+            startup_timeout_s=1.0,
+            kill_grace_s=0.0,
+        )
+        adapter._connection = FakeConnection()
+        adapter._process = FakeProcess()
+
+        outcome = adapter.execute('SELECT * WHERE { ?s ?p ?o }')
+
+        self.assertEqual(outcome.result_count, 7)
+
     def test_rdflib_paths_accept_shared_and_absolute_inputs(self):
         with tempfile.TemporaryDirectory() as directory:
             shared = os.path.join(directory, 'shared')
@@ -149,6 +238,7 @@ class UnitTests(unittest.TestCase):
                     system='fake-vortex',
                     warmup_runs=0,
                     measured_runs=1,
+                    timeout_mode='none',
                 )
 
             self.assertTrue(success)
