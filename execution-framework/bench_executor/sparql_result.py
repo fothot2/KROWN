@@ -8,6 +8,9 @@ from typing import Any
 
 from rdflib import BNode, Literal, URIRef
 
+from bench_executor.query_features import classify_query, \
+        comparison_metadata
+
 CORRECTNESS_MODES = frozenset({'none', 'fingerprint', 'full'})
 
 
@@ -50,6 +53,7 @@ def normalize_materialized_result(result, rows: list,
                                   query: str) -> dict[str, Any]:
     """Normalize one already materialized RDFLib result."""
     result_type = str(getattr(result, 'type', '')).upper()
+    features = classify_query(query)
     contains_blank_nodes = False
 
     if result_type == 'SELECT':
@@ -62,7 +66,7 @@ def normalize_materialized_result(result, rows: list,
                 for term in normalized
             )
             normalized_rows.append(normalized)
-        ordered = _query_has_order_by(query)
+        ordered = features.has_order_by
         fingerprint_rows = normalized_rows if ordered else sorted(
             normalized_rows, key=_canonical_json
         )
@@ -103,7 +107,7 @@ def normalize_materialized_result(result, rows: list,
     else:
         raise ValueError(f'Unsupported RDFLib result type: {result_type}')
 
-    return {
+    output = {
         'result_kind': payload['result_kind'],
         'result_variables': payload.get('variables', []),
         'result_ordered': payload.get('ordered', False),
@@ -111,6 +115,8 @@ def normalize_materialized_result(result, rows: list,
         'contains_blank_nodes': contains_blank_nodes,
         'normalized_result': retained,
     }
+    output.update(comparison_metadata(features, contains_blank_nodes))
+    return output
 
 def _normalize_sparql_json_binding(binding: dict) -> dict:
     """Convert one SPARQL Results JSON binding to canonical term JSON."""
@@ -135,12 +141,13 @@ def normalize_sparql_json_result(document: dict,
     """Normalize one complete SPARQL Results JSON document."""
     if not isinstance(document, dict):
         raise ValueError('SPARQL JSON result must be an object')
+    features = classify_query(query)
     if 'boolean' in document:
         value = document['boolean']
         if not isinstance(value, bool):
             raise ValueError('SPARQL ASK boolean must be true or false')
         payload = {'result_kind': 'ask', 'boolean': value}
-        return {
+        output = {
             'result_count': 1 if value else 0,
             'result_kind': 'ask',
             'result_variables': [],
@@ -149,6 +156,8 @@ def normalize_sparql_json_result(document: dict,
             'contains_blank_nodes': False,
             'normalized_result': payload,
         }
+        output.update(comparison_metadata(features, False))
+        return output
 
     head = document.get('head')
     results = document.get('results')
@@ -180,7 +189,7 @@ def normalize_sparql_json_result(document: dict,
             row.append(term)
         rows.append(row)
 
-    ordered = _query_has_order_by(query)
+    ordered = features.has_order_by
     fingerprint_rows = rows if ordered else sorted(rows, key=_canonical_json)
     payload = {
         'result_kind': 'select',
@@ -194,7 +203,7 @@ def normalize_sparql_json_result(document: dict,
         'ordered': ordered,
         'rows': rows,
     }
-    return {
+    output = {
         'result_count': len(rows),
         'result_kind': 'select',
         'result_variables': variables,
@@ -203,3 +212,5 @@ def normalize_sparql_json_result(document: dict,
         'contains_blank_nodes': contains_blank_nodes,
         'normalized_result': retained,
     }
+    output.update(comparison_metadata(features, contains_blank_nodes))
+    return output

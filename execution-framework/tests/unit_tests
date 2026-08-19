@@ -35,6 +35,8 @@ from bench_executor.rdf_query_benchmark import _load_query_manifest, \
 from bench_executor.sparql_result import _normalize_term, \
         normalize_materialized_result, \
         normalize_sparql_json_result  # noqa: E402
+from bench_executor.query_features import classify_query, \
+        comparison_metadata  # noqa: E402
 from bench_executor.sparql_http_benchmark import _SparqlHttpAdapter, \
         SparqlHttpBenchmark  # noqa: E402
 from bench_executor.rdflib_query_benchmark import _resolve_input_path, \
@@ -51,6 +53,64 @@ CASE_INFO_FILE_NAME = 'case-info.txt'
 
 
 class UnitTests(unittest.TestCase):
+    def test_query_features_classify_comparison_modes(self):
+        cases = [
+            (
+                'SELECT ?s WHERE { ?s ?p ?o }',
+                'select', False, False, False,
+                'unordered_multiset_fingerprint',
+            ),
+            (
+                'SELECT ?s WHERE { ?s ?p ?o } ORDER BY ?s LIMIT 5',
+                'select', True, True, False,
+                'ordered_fingerprint',
+            ),
+            (
+                'SELECT ?s WHERE { ?s ?p ?o } LIMIT 5',
+                'select', False, True, False,
+                'count_only_nondeterministic_limit',
+            ),
+            (
+                'SELECT ?s WHERE { ?s ?p ?o } OFFSET 2',
+                'select', False, False, True,
+                'unordered_multiset_fingerprint',
+            ),
+            (
+                'ASK { ?s ?p ?o }',
+                'ask', False, False, False,
+                'boolean',
+            ),
+        ]
+
+        for query, result_type, ordered, limited, offset, mode in cases:
+            with self.subTest(query=query):
+                features = classify_query(query)
+                metadata = comparison_metadata(features, False)
+                self.assertEqual(features.result_type, result_type)
+                self.assertEqual(features.has_order_by, ordered)
+                self.assertEqual(features.has_limit, limited)
+                self.assertEqual(features.has_offset, offset)
+                self.assertEqual(metadata['comparison_mode'], mode)
+
+    def test_query_features_ignore_comment_keywords(self):
+        features = classify_query(
+            'SELECT ?s WHERE { ?s ?p ?o } # ORDER BY ?s LIMIT 1'
+        )
+
+        self.assertFalse(features.has_order_by)
+        self.assertFalse(features.has_limit)
+
+    def test_query_features_mark_blank_nodes_provisional(self):
+        features = classify_query(
+            'SELECT ?s WHERE { ?s ?p ?o } ORDER BY ?s'
+        )
+        metadata = comparison_metadata(features, True)
+
+        self.assertEqual(
+            metadata['comparison_mode'], 'provisional_blank_nodes'
+        )
+        self.assertIsNotNone(metadata['comparison_warning'])
+
     def test_sparql_json_matches_rdflib_fingerprint(self):
         from rdflib import Literal, URIRef, Variable
 

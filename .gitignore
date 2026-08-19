@@ -1,3 +1,6 @@
 data-generator/MorphKGC-query-extension/*
 data-generator/MorphKGC/*
 smoke-query-benchmark/*
+frozen-four-system/*
+smoke-sparql-http-benchmark/*
+frozen-validation/*
