@@ -111,3 +111,95 @@ def normalize_materialized_result(result, rows: list,
         'contains_blank_nodes': contains_blank_nodes,
         'normalized_result': retained,
     }
+
+def _normalize_sparql_json_binding(binding: dict) -> dict:
+    """Convert one SPARQL Results JSON binding to canonical term JSON."""
+    binding_type = binding.get('type')
+    value = binding.get('value')
+    if binding_type == 'uri':
+        return {'type': 'uri', 'value': value}
+    if binding_type == 'bnode':
+        return {'type': 'bnode', 'value': value}
+    if binding_type in {'literal', 'typed-literal'}:
+        return {
+            'type': 'literal',
+            'value': value,
+            'language': binding.get('xml:lang') or binding.get('lang'),
+            'datatype': binding.get('datatype'),
+        }
+    raise ValueError(f'Unsupported SPARQL JSON binding type: {binding_type}')
+
+
+def normalize_sparql_json_result(document: dict,
+                                 query: str) -> dict[str, Any]:
+    """Normalize one complete SPARQL Results JSON document."""
+    if not isinstance(document, dict):
+        raise ValueError('SPARQL JSON result must be an object')
+    if 'boolean' in document:
+        value = document['boolean']
+        if not isinstance(value, bool):
+            raise ValueError('SPARQL ASK boolean must be true or false')
+        payload = {'result_kind': 'ask', 'boolean': value}
+        return {
+            'result_count': 1 if value else 0,
+            'result_kind': 'ask',
+            'result_variables': [],
+            'result_ordered': False,
+            'result_fingerprint': _fingerprint(payload),
+            'contains_blank_nodes': False,
+            'normalized_result': payload,
+        }
+
+    head = document.get('head')
+    results = document.get('results')
+    if not isinstance(head, dict) or not isinstance(results, dict):
+        raise ValueError('SPARQL SELECT JSON requires head and results')
+    variables = head.get('vars')
+    bindings = results.get('bindings')
+    if not isinstance(variables, list) or not all(
+            isinstance(variable, str) for variable in variables):
+        raise ValueError('SPARQL SELECT variables must be strings')
+    if not isinstance(bindings, list):
+        raise ValueError('SPARQL SELECT bindings must be an array')
+
+    rows = []
+    contains_blank_nodes = False
+    for binding_row in bindings:
+        if not isinstance(binding_row, dict):
+            raise ValueError('SPARQL SELECT binding row must be an object')
+        row = []
+        for variable in variables:
+            raw_term = binding_row.get(variable)
+            term = (
+                None if raw_term is None
+                else _normalize_sparql_json_binding(raw_term)
+            )
+            contains_blank_nodes |= (
+                term is not None and term.get('type') == 'bnode'
+            )
+            row.append(term)
+        rows.append(row)
+
+    ordered = _query_has_order_by(query)
+    fingerprint_rows = rows if ordered else sorted(rows, key=_canonical_json)
+    payload = {
+        'result_kind': 'select',
+        'variables': variables,
+        'ordered': ordered,
+        'rows': fingerprint_rows,
+    }
+    retained = {
+        'result_kind': 'select',
+        'variables': variables,
+        'ordered': ordered,
+        'rows': rows,
+    }
+    return {
+        'result_count': len(rows),
+        'result_kind': 'select',
+        'result_variables': variables,
+        'result_ordered': ordered,
+        'result_fingerprint': _fingerprint(payload),
+        'contains_blank_nodes': contains_blank_nodes,
+        'normalized_result': retained,
+    }

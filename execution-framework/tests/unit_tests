@@ -33,7 +33,10 @@ from bench_executor.rdf_query_benchmark import _load_query_manifest, \
         _QueryOutcome, _QueryTimeoutError, _RdfQueryAdapter, \
         _RdfQueryBenchmark  # noqa: E402
 from bench_executor.sparql_result import _normalize_term, \
-        normalize_materialized_result  # noqa: E402
+        normalize_materialized_result, \
+        normalize_sparql_json_result  # noqa: E402
+from bench_executor.sparql_http_benchmark import _SparqlHttpAdapter, \
+        SparqlHttpBenchmark  # noqa: E402
 from bench_executor.rdflib_query_benchmark import _resolve_input_path, \
         _resolve_output_path, _RdfLibAdapter, _WorkerRdfLibAdapter, \
         RdfLibQueryBenchmark  # noqa: E402
@@ -48,6 +51,98 @@ CASE_INFO_FILE_NAME = 'case-info.txt'
 
 
 class UnitTests(unittest.TestCase):
+    def test_sparql_json_matches_rdflib_fingerprint(self):
+        from rdflib import Literal, URIRef, Variable
+
+        class Result:
+            type = 'SELECT'
+            vars = [Variable('p'), Variable('o')]
+
+        query = 'SELECT ?p ?o WHERE { ?s ?p ?o } ORDER BY ?p ?o'
+        rows = [
+            (URIRef('http://example.org/name'), Literal('Alice', lang='en')),
+            (URIRef('http://example.org/age'), Literal(42)),
+        ]
+        rdflib_result = normalize_materialized_result(Result(), rows, query)
+        http_result = normalize_sparql_json_result({
+            'head': {'vars': ['p', 'o']},
+            'results': {'bindings': [
+                {
+                    'p': {'type': 'uri', 'value': 'http://example.org/name'},
+                    'o': {
+                        'type': 'literal', 'value': 'Alice',
+                        'xml:lang': 'en',
+                    },
+                },
+                {
+                    'p': {'type': 'uri', 'value': 'http://example.org/age'},
+                    'o': {
+                        'type': 'literal', 'value': '42',
+                        'datatype': (
+                            'http://www.w3.org/2001/XMLSchema#integer'
+                        ),
+                    },
+                },
+            ]},
+        }, query)
+
+        self.assertEqual(
+            rdflib_result['result_fingerprint'],
+            http_result['result_fingerprint'],
+        )
+
+    def test_sparql_json_preserves_unbound_and_duplicates(self):
+        result = normalize_sparql_json_result({
+            'head': {'vars': ['x', 'y']},
+            'results': {'bindings': [
+                {'x': {'type': 'uri', 'value': 'http://example.org/a'}},
+                {'x': {'type': 'uri', 'value': 'http://example.org/a'}},
+            ]},
+        }, 'SELECT ?x ?y WHERE { ?x ?p ?o OPTIONAL { ?x ?q ?y } }')
+
+        self.assertEqual(result['result_count'], 2)
+        self.assertEqual(result['normalized_result']['rows'][0][1], None)
+        self.assertEqual(
+            result['normalized_result']['rows'][0],
+            result['normalized_result']['rows'][1],
+        )
+
+    def test_sparql_http_adapter_times_complete_response(self):
+        class FakeResponse:
+            status_code = 200
+            content = b'{"head":{"vars":["x"]},"results":{"bindings":[]}}'
+            headers = {'Content-Type': 'application/sparql-results+json'}
+
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {
+                    'head': {'vars': ['x']},
+                    'results': {'bindings': []},
+                }
+
+        session = MagicMock()
+        session.post.return_value = FakeResponse()
+        adapter = _SparqlHttpAdapter(
+            endpoint='http://example.test/sparql',
+            timeout_s=1.0,
+            correctness_mode='full',
+        )
+        adapter._session = session
+
+        outcome = adapter.execute('SELECT ?x WHERE { ?x ?p ?o }')
+
+        self.assertEqual(outcome.result_count, 0)
+        self.assertIsNotNone(outcome.result_fingerprint)
+        self.assertIsInstance(outcome.elapsed_ns, int)
+        self.assertEqual(
+            outcome.metadata['measurement_boundary'],
+            'sparql-http-complete-response',
+        )
+        self.assertTrue(outcome.metadata['full_result_retained'])
+        session.post.assert_called_once()
+
     def test_sparql_term_normalization(self):
         from rdflib import BNode, Literal, URIRef
 
