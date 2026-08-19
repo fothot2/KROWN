@@ -11,6 +11,9 @@ import psutil
 
 from rdflib import Graph
 
+from bench_executor.sparql_result import CORRECTNESS_MODES, \
+        normalize_materialized_result
+
 from bench_executor.logger import Logger
 from bench_executor.rdf_query_benchmark import _load_query_manifest, \
         _QueryOutcome, _QueryTimeoutError, _RdfQueryAdapter, \
@@ -61,12 +64,15 @@ class _RdfLibAdapter(_RdfQueryAdapter):
     """Execute SPARQL with one RDFLib Graph and consume all result rows."""
 
     def __init__(self, engine: str, artifact_path: str,
-                 vortex_layout: str):
+                 vortex_layout: str, correctness_mode: str = 'none',
+                 full_result_max_rows: int = 10000):
         if engine not in SUPPORTED_ENGINES:
             raise ValueError(f'Unsupported RDFLib engine: {engine}')
         self._engine = engine
         self._artifact_path = artifact_path
         self._vortex_layout = vortex_layout
+        self._correctness_mode = correctness_mode
+        self._full_result_max_rows = full_result_max_rows
         self._graph = None
 
     def open(self) -> None:
@@ -88,8 +94,29 @@ class _RdfLibAdapter(_RdfQueryAdapter):
     def execute(self, query: str) -> _QueryOutcome:
         if self._graph is None:
             raise RuntimeError('RDFLib adapter is not open')
-        rows = list(self._graph.query(query))
-        return _QueryOutcome(result_count=len(rows))
+        started_ns = time.perf_counter_ns()
+        result = self._graph.query(query)
+        rows = list(result)
+        elapsed_ns = time.perf_counter_ns() - started_ns
+        metadata = {
+            'measurement_boundary': 'rdflib-full-result-materialization',
+        }
+        fingerprint = None
+        if self._correctness_mode != 'none':
+            correctness = normalize_materialized_result(result, rows, query)
+            fingerprint = correctness.pop('result_fingerprint')
+            normalized = correctness.pop('normalized_result')
+            metadata.update(correctness)
+            if self._correctness_mode == 'full':
+                metadata['full_result_retained'] = (
+                    len(rows) <= self._full_result_max_rows
+                )
+                if metadata['full_result_retained']:
+                    metadata['normalized_result'] = normalized
+        return _QueryOutcome(
+            result_count=len(rows), result_fingerprint=fingerprint,
+            elapsed_ns=elapsed_ns, metadata=metadata,
+        )
 
     def close(self) -> None:
         if self._graph is not None:
@@ -116,7 +143,8 @@ def _make_rdflib_graph(engine: str, artifact_path: str,
 
 
 def _rdflib_worker(connection, engine: str, artifact_path: str,
-                   vortex_layout: str) -> None:
+                   vortex_layout: str, correctness_mode: str,
+                   full_result_max_rows: int) -> None:
     """Own one RDFLib graph and execute parent-issued queries serially."""
     graph = None
     try:
@@ -130,13 +158,39 @@ def _rdflib_worker(connection, engine: str, artifact_path: str,
                 return
             request_id = request['request_id']
             try:
-                rows = list(graph.query(request['query']))
-                connection.send({
+                query = request['query']
+                started_ns = time.perf_counter_ns()
+                result = graph.query(query)
+                rows = list(result)
+                elapsed_ns = time.perf_counter_ns() - started_ns
+                response = {
                     'kind': 'result',
                     'request_id': request_id,
                     'status': 'ok',
                     'result_count': len(rows),
-                })
+                    'elapsed_ns': elapsed_ns,
+                    'metadata': {
+                        'measurement_boundary': (
+                            'rdflib-full-result-materialization'
+                        ),
+                    },
+                    'result_fingerprint': None,
+                }
+                if correctness_mode != 'none':
+                    correctness = normalize_materialized_result(
+                        result, rows, query
+                    )
+                    response['result_fingerprint'] = correctness.pop(
+                        'result_fingerprint'
+                    )
+                    normalized = correctness.pop('normalized_result')
+                    response['metadata'].update(correctness)
+                    if correctness_mode == 'full':
+                        retained = len(rows) <= full_result_max_rows
+                        response['metadata']['full_result_retained'] = retained
+                        if retained:
+                            response['metadata']['normalized_result'] = normalized
+                connection.send(response)
             except BaseException as error:
                 connection.send({
                     'kind': 'result',
@@ -192,7 +246,9 @@ class _WorkerRdfLibAdapter(_RdfQueryAdapter):
 
     def __init__(self, engine: str, artifact_path: str,
                  vortex_layout: str, timeout_s: float,
-                 startup_timeout_s: float, kill_grace_s: float):
+                 startup_timeout_s: float, kill_grace_s: float,
+                 correctness_mode: str = 'none',
+                 full_result_max_rows: int = 10000):
         if timeout_s <= 0:
             raise ValueError('timeout_s must be greater than zero')
         if startup_timeout_s <= 0:
@@ -204,7 +260,13 @@ class _WorkerRdfLibAdapter(_RdfQueryAdapter):
         self._vortex_layout = vortex_layout
         self._timeout_s = timeout_s
         self._startup_timeout_s = startup_timeout_s
+        if correctness_mode not in CORRECTNESS_MODES:
+            raise ValueError(f'Unsupported correctness_mode: {correctness_mode}')
+        if full_result_max_rows < 0:
+            raise ValueError('full_result_max_rows must be zero or greater')
         self._kill_grace_s = kill_grace_s
+        self._correctness_mode = correctness_mode
+        self._full_result_max_rows = full_result_max_rows
         self._connection = None
         self._process = None
         self._next_request_id = 0
@@ -231,6 +293,8 @@ class _WorkerRdfLibAdapter(_RdfQueryAdapter):
                 self._engine,
                 self._artifact_path,
                 self._vortex_layout,
+                self._correctness_mode,
+                self._full_result_max_rows,
             ),
             name=f'krown-{self._engine}-query-worker',
             daemon=True,
@@ -290,7 +354,12 @@ class _WorkerRdfLibAdapter(_RdfQueryAdapter):
                 f'{message.get("error_type", "WorkerError")}: '
                 f'{message.get("error_message", "unknown worker error")}'
             )
-        return _QueryOutcome(result_count=message['result_count'])
+        return _QueryOutcome(
+            result_count=message['result_count'],
+            result_fingerprint=message.get('result_fingerprint'),
+            elapsed_ns=message.get('elapsed_ns'),
+            metadata=message.get('metadata', {}),
+        )
 
     def close(self) -> None:
         if (self._connection is not None and self._process is not None
@@ -334,7 +403,9 @@ class RdfLibQueryBenchmark:
                 timeout_s: float = 60.0,
                 timeout_mode: str = 'worker',
                 startup_timeout_s: float = 120.0,
-                kill_grace_s: float = 1.0) -> bool:
+                kill_grace_s: float = 1.0,
+                correctness_mode: str = 'fingerprint',
+                full_result_max_rows: int = 10000) -> bool:
         """Execute a Vortex or COTTAS workload and save JSON Lines records."""
         try:
             if engine not in SUPPORTED_ENGINES:
@@ -350,6 +421,14 @@ class RdfLibQueryBenchmark:
             )
             manifest = _load_query_manifest(manifest_path)
 
+            if correctness_mode not in CORRECTNESS_MODES:
+                raise ValueError(
+                    f'Unsupported correctness_mode: {correctness_mode}'
+                )
+            if full_result_max_rows < 0:
+                raise ValueError(
+                    'full_result_max_rows must be zero or greater'
+                )
             if timeout_mode not in {'none', 'worker'}:
                 raise ValueError(
                     f'Unsupported timeout_mode: {timeout_mode}'
@@ -360,6 +439,8 @@ class RdfLibQueryBenchmark:
                         engine=engine,
                         artifact_path=artifact_path,
                         vortex_layout=vortex_layout,
+                        correctness_mode=correctness_mode,
+                        full_result_max_rows=full_result_max_rows,
                     )
             else:
                 def adapter_factory():
@@ -370,6 +451,8 @@ class RdfLibQueryBenchmark:
                         timeout_s=timeout_s,
                         startup_timeout_s=startup_timeout_s,
                         kill_grace_s=kill_grace_s,
+                        correctness_mode=correctness_mode,
+                        full_result_max_rows=full_result_max_rows,
                     )
 
             benchmark = _RdfQueryBenchmark(

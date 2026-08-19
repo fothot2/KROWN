@@ -63,6 +63,7 @@ class _QueryOutcome:
 
     result_count: int
     result_fingerprint: str | None = None
+    elapsed_ns: int | None = None
     metadata: Mapping[str, Any] = dataclasses.field(default_factory=dict)
 
     def __post_init__(self):
@@ -76,6 +77,11 @@ class _QueryOutcome:
             raise ValueError(
                 'result_fingerprint must be null or a non-empty string'
             )
+        if self.elapsed_ns is not None:
+            if (not isinstance(self.elapsed_ns, int)
+                    or isinstance(self.elapsed_ns, bool)
+                    or self.elapsed_ns < 0):
+                raise ValueError('elapsed_ns must be null or non-negative')
         if not isinstance(self.metadata, Mapping):
             raise TypeError('metadata must be a mapping')
 
@@ -262,7 +268,11 @@ class _RdfQueryBenchmark:
                     'adapter.execute() must return _QueryOutcome'
                 )
             record.update({
-                'elapsed_ns': elapsed_ns,
+                'elapsed_ns': (
+                    outcome.elapsed_ns
+                    if outcome.elapsed_ns is not None else elapsed_ns
+                ),
+                'client_elapsed_ns': elapsed_ns,
                 'result_count': outcome.result_count,
                 'result_fingerprint': outcome.result_fingerprint,
             })

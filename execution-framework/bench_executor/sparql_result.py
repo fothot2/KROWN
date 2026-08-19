@@ -1,0 +1,113 @@
+#!/usr/bin/env python3
+"""Normalize materialized RDFLib query results for correctness checks."""
+
+import hashlib
+import json
+import re
+from typing import Any
+
+from rdflib import BNode, Literal, URIRef
+
+CORRECTNESS_MODES = frozenset({'none', 'fingerprint', 'full'})
+
+
+def _normalize_term(term) -> dict[str, Any] | None:
+    """Convert one RDFLib term to stable JSON data."""
+    if term is None:
+        return None
+    if isinstance(term, URIRef):
+        return {'type': 'uri', 'value': str(term)}
+    if isinstance(term, BNode):
+        return {'type': 'bnode', 'value': str(term)}
+    if isinstance(term, Literal):
+        return {
+            'type': 'literal',
+            'value': str(term),
+            'language': term.language,
+            'datatype': str(term.datatype) if term.datatype else None,
+        }
+    raise TypeError(f'Unsupported RDF term type: {type(term).__name__}')
+
+
+def _canonical_json(value: Any) -> str:
+    return json.dumps(
+        value, ensure_ascii=False, allow_nan=False,
+        separators=(',', ':'), sort_keys=True,
+    )
+
+
+def _query_has_order_by(query: str) -> bool:
+    """Detect an ORDER BY clause after removing SPARQL comments."""
+    without_comments = re.sub(r'#[^\r\n]*', ' ', query)
+    return re.search(r'\bORDER\s+BY\b', without_comments, re.I) is not None
+
+
+def _fingerprint(payload: dict[str, Any]) -> str:
+    return hashlib.sha256(_canonical_json(payload).encode('utf-8')).hexdigest()
+
+
+def normalize_materialized_result(result, rows: list,
+                                  query: str) -> dict[str, Any]:
+    """Normalize one already materialized RDFLib result."""
+    result_type = str(getattr(result, 'type', '')).upper()
+    contains_blank_nodes = False
+
+    if result_type == 'SELECT':
+        variables = [str(variable) for variable in (result.vars or [])]
+        normalized_rows = []
+        for row in rows:
+            normalized = [_normalize_term(term) for term in row]
+            contains_blank_nodes |= any(
+                term is not None and term.get('type') == 'bnode'
+                for term in normalized
+            )
+            normalized_rows.append(normalized)
+        ordered = _query_has_order_by(query)
+        fingerprint_rows = normalized_rows if ordered else sorted(
+            normalized_rows, key=_canonical_json
+        )
+        payload = {
+            'result_kind': 'select',
+            'variables': variables,
+            'ordered': ordered,
+            'rows': fingerprint_rows,
+        }
+        retained = {
+            'result_kind': 'select',
+            'variables': variables,
+            'ordered': ordered,
+            'rows': normalized_rows,
+        }
+    elif result_type == 'ASK':
+        value = bool(getattr(result, 'askAnswer', rows[0] if rows else False))
+        payload = {'result_kind': 'ask', 'boolean': value}
+        retained = dict(payload)
+    elif result_type in {'CONSTRUCT', 'DESCRIBE'}:
+        normalized_rows = []
+        for subject, predicate, object_ in rows:
+            normalized = [
+                _normalize_term(subject),
+                _normalize_term(predicate),
+                _normalize_term(object_),
+            ]
+            contains_blank_nodes |= any(
+                term.get('type') == 'bnode' for term in normalized
+            )
+            normalized_rows.append(normalized)
+        normalized_rows.sort(key=_canonical_json)
+        payload = {
+            'result_kind': 'graph',
+            'triples': normalized_rows,
+        }
+        retained = dict(payload)
+    else:
+        raise ValueError(f'Unsupported RDFLib result type: {result_type}')
+
+    return {
+        'result_kind': payload['result_kind'],
+        'result_variables': payload.get('variables', []),
+        'result_ordered': payload.get('ordered', False),
+        'result_fingerprint': _fingerprint(payload),
+        'contains_blank_nodes': contains_blank_nodes,
+        'normalized_result': retained,
+    }

@@ -32,6 +32,8 @@ from bench_executor.benchmark_result import SCHEMA_VERSION, \
 from bench_executor.rdf_query_benchmark import _load_query_manifest, \
         _QueryOutcome, _QueryTimeoutError, _RdfQueryAdapter, \
         _RdfQueryBenchmark  # noqa: E402
+from bench_executor.sparql_result import _normalize_term, \
+        normalize_materialized_result  # noqa: E402
 from bench_executor.rdflib_query_benchmark import _resolve_input_path, \
         _resolve_output_path, _RdfLibAdapter, _WorkerRdfLibAdapter, \
         RdfLibQueryBenchmark  # noqa: E402
@@ -46,6 +48,77 @@ CASE_INFO_FILE_NAME = 'case-info.txt'
 
 
 class UnitTests(unittest.TestCase):
+    def test_sparql_term_normalization(self):
+        from rdflib import BNode, Literal, URIRef
+
+        self.assertEqual(
+            _normalize_term(URIRef('http://example.org/a')),
+            {'type': 'uri', 'value': 'http://example.org/a'},
+        )
+        self.assertEqual(
+            _normalize_term(BNode('b1')),
+            {'type': 'bnode', 'value': 'b1'},
+        )
+        self.assertEqual(
+            _normalize_term(Literal('Alice', lang='en')),
+            {
+                'type': 'literal', 'value': 'Alice',
+                'language': 'en', 'datatype': None,
+            },
+        )
+
+    def test_sparql_select_fingerprint_keeps_duplicates(self):
+        from rdflib import Literal, Variable
+
+        class Result:
+            type = 'SELECT'
+            vars = [Variable('x')]
+
+        rows = [(Literal('a'),), (Literal('a'),), (Literal('b'),)]
+        first = normalize_materialized_result(
+            Result(), rows, 'SELECT ?x WHERE { ?s ?p ?x }'
+        )
+        second = normalize_materialized_result(
+            Result(), list(reversed(rows)),
+            'SELECT ?x WHERE { ?s ?p ?x }'
+        )
+        without_duplicate = normalize_materialized_result(
+            Result(), rows[1:], 'SELECT ?x WHERE { ?s ?p ?x }'
+        )
+
+        self.assertEqual(
+            first['result_fingerprint'], second['result_fingerprint']
+        )
+        self.assertNotEqual(
+            first['result_fingerprint'],
+            without_duplicate['result_fingerprint'],
+        )
+
+    def test_query_runner_prefers_adapter_elapsed_time(self):
+        class TimedAdapter(_RdfQueryAdapter):
+            def execute(self, query):
+                return _QueryOutcome(
+                    result_count=1,
+                    elapsed_ns=123,
+                    metadata={'measurement_boundary': 'test'},
+                )
+
+        with tempfile.TemporaryDirectory() as directory:
+            manifest = _load_query_manifest(
+                self._write_query_manifest(directory)
+            )
+            records = _RdfQueryBenchmark(
+                adapter_factory=TimedAdapter,
+                experiment_id='timing', system='fake',
+                manifest=manifest, warmup_runs=0, measured_runs=1,
+            ).run(os.path.join(directory, 'results.jsonl'))
+
+            self.assertTrue(all(row['elapsed_ns'] == 123 for row in records))
+            self.assertTrue(all(
+                row['client_elapsed_ns'] >= row['elapsed_ns']
+                for row in records
+            ))
+
     def test_rdflib_worker_reports_hard_timeout(self):
         class FakeConnection:
             def __init__(self):
@@ -109,6 +182,9 @@ class UnitTests(unittest.TestCase):
                     'request_id': self.request['request_id'],
                     'status': 'ok',
                     'result_count': 7,
+                    'elapsed_ns': 99,
+                    'result_fingerprint': 'abc',
+                    'metadata': {'result_kind': 'select'},
                 }
 
             def close(self):
