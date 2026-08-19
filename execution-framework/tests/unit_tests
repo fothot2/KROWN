@@ -29,6 +29,9 @@ from bench_executor.executor import Executor, \
 from bench_executor.benchmark_result import SCHEMA_VERSION, \
         sha256_file, sha256_text, validate_query_record, \
         write_query_records_atomic  # noqa: E402
+from bench_executor.rdf_query_benchmark import _load_query_manifest, \
+        _QueryOutcome, _QueryTimeoutError, _RdfQueryAdapter, \
+        _RdfQueryBenchmark  # noqa: E402
 
 LOG_DIR = os.path.join(os.path.dirname(__file__), '..', 'bench_executor',
                        'log')
@@ -40,6 +43,176 @@ CASE_INFO_FILE_NAME = 'case-info.txt'
 
 
 class UnitTests(unittest.TestCase):
+    @staticmethod
+    def _write_query_manifest(directory):
+        path = os.path.join(directory, 'queries.json')
+        manifest = {
+            'schema_version': 1,
+            'workload': 'smoke-workload',
+            'dataset': 'smoke-dataset',
+            'queries': [
+                {
+                    'query_id': 'q1',
+                    'query': 'SELECT * WHERE { ?s ?p ?o }',
+                    'family': 'tp',
+                },
+                {
+                    'query_id': 'q2',
+                    'query': 'SELECT * WHERE { ?s ?p ?o } LIMIT 0',
+                    'family': 'zero',
+                },
+            ],
+        }
+        with open(path, 'w', encoding='utf-8') as stream:
+            json.dump(manifest, stream)
+        return path
+
+    def test_query_manifest_rejects_duplicate_query_ids(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = self._write_query_manifest(directory)
+            with open(path, 'r', encoding='utf-8') as stream:
+                manifest = json.load(stream)
+            manifest['queries'][1]['query_id'] = 'q1'
+            with open(path, 'w', encoding='utf-8') as stream:
+                json.dump(manifest, stream)
+
+            with self.assertRaisesRegex(ValueError, 'Duplicate query_id'):
+                _load_query_manifest(path)
+
+    def test_query_benchmark_writes_complete_attempts(self):
+        class FakeAdapter(_RdfQueryAdapter):
+            opens = 0
+            closes = 0
+
+            def open(self):
+                type(self).opens += 1
+
+            def execute(self, query):
+                return _QueryOutcome(
+                    result_count=0 if 'LIMIT 0' in query else 3
+                )
+
+            def close(self):
+                type(self).closes += 1
+
+        with tempfile.TemporaryDirectory() as directory:
+            manifest = _load_query_manifest(
+                self._write_query_manifest(directory)
+            )
+            output = os.path.join(directory, 'raw.jsonl')
+            benchmark = _RdfQueryBenchmark(
+                adapter_factory=FakeAdapter,
+                experiment_id='smoke',
+                system='fake',
+                manifest=manifest,
+                warmup_runs=1,
+                measured_runs=2,
+                lifecycle='shared',
+            )
+
+            records = benchmark.run(output)
+
+            self.assertEqual(len(records), 6)
+            self.assertEqual(FakeAdapter.opens, 1)
+            self.assertEqual(FakeAdapter.closes, 1)
+            self.assertTrue(all(row['status'] == 'ok' for row in records))
+            self.assertTrue(all(row['elapsed_ns'] >= 0 for row in records))
+            zero_rows = [
+                row for row in records if row['query_id'] == 'q2'
+            ]
+            self.assertTrue(all(row['result_count'] == 0 for row in zero_rows))
+            with open(output, 'r', encoding='utf-8') as stream:
+                persisted = [json.loads(line) for line in stream]
+            self.assertEqual(len(persisted), 6)
+            self.assertNotIn('_traceback', persisted[0])
+
+    def test_query_benchmark_skips_after_warmup_timeout(self):
+        class TimeoutAdapter(_RdfQueryAdapter):
+            def execute(self, query):
+                if 'LIMIT 0' not in query:
+                    raise _QueryTimeoutError('test timeout')
+                return _QueryOutcome(result_count=0)
+
+        with tempfile.TemporaryDirectory() as directory:
+            manifest = _load_query_manifest(
+                self._write_query_manifest(directory)
+            )
+            output = os.path.join(directory, 'raw.jsonl')
+            records = _RdfQueryBenchmark(
+                adapter_factory=TimeoutAdapter,
+                experiment_id='smoke',
+                system='fake',
+                manifest=manifest,
+                warmup_runs=1,
+                measured_runs=2,
+            ).run(output)
+
+            q1 = [row for row in records if row['query_id'] == 'q1']
+            self.assertEqual(
+                [row['status'] for row in q1],
+                ['timeout', 'skipped', 'skipped'],
+            )
+            self.assertIsNone(q1[1]['elapsed_ns'])
+
+    def test_query_benchmark_uses_deterministic_order(self):
+        class FakeAdapter(_RdfQueryAdapter):
+            def execute(self, query):
+                return _QueryOutcome(result_count=1)
+
+        with tempfile.TemporaryDirectory() as directory:
+            manifest = _load_query_manifest(
+                self._write_query_manifest(directory)
+            )
+            outputs = []
+            for name in ('a.jsonl', 'b.jsonl'):
+                records = _RdfQueryBenchmark(
+                    adapter_factory=FakeAdapter,
+                    experiment_id='smoke',
+                    system='fake',
+                    manifest=manifest,
+                    warmup_runs=0,
+                    measured_runs=2,
+                    shuffle=True,
+                    seed=17,
+                ).run(os.path.join(directory, name))
+                outputs.append([
+                    (row['run'], row['order'], row['query_id'], row['seed'])
+                    for row in records
+                ])
+
+            self.assertEqual(outputs[0], outputs[1])
+
+    def test_query_benchmark_closes_per_attempt_adapter(self):
+        class FakeAdapter(_RdfQueryAdapter):
+            opens = 0
+            closes = 0
+
+            def open(self):
+                type(self).opens += 1
+
+            def execute(self, query):
+                return _QueryOutcome(result_count=1)
+
+            def close(self):
+                type(self).closes += 1
+
+        with tempfile.TemporaryDirectory() as directory:
+            manifest = _load_query_manifest(
+                self._write_query_manifest(directory)
+            )
+            _RdfQueryBenchmark(
+                adapter_factory=FakeAdapter,
+                experiment_id='smoke',
+                system='fake',
+                manifest=manifest,
+                warmup_runs=0,
+                measured_runs=2,
+                lifecycle='per_attempt',
+            ).run(os.path.join(directory, 'raw.jsonl'))
+
+            self.assertEqual(FakeAdapter.opens, 4)
+            self.assertEqual(FakeAdapter.closes, 4)
+
     @staticmethod
     def _benchmark_record(**changes):
         record = {
