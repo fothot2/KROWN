@@ -5,6 +5,7 @@ import sys
 import unittest
 import subprocess
 import requests
+from unittest.mock import patch
 sys.path.append('../')
 from bench_executor.container import ContainerManager  # noqa: E402
 from bench_executor.virtuoso import Virtuoso  # noqa: E402
@@ -152,6 +153,30 @@ class TriplestoreTests(unittest.TestCase):
                                       {'Accept': 'text/plain'})
         results = list(filter(None, results.split('\n')))
         self.assertEqual(len(results), 100, str(results))
+
+    def test_query_execute_from_file_and_save_propagates_success(self):
+        q = Query(DATA_DIR, CONFIG_DIR, LOG_DIR, False)
+        with patch.object(q, '_read_query_file',
+                          return_value='SELECT * {}'), \
+                patch.object(q, 'execute_and_save',
+                             return_value=True) as save:
+            self.assertTrue(q.execute_from_file_and_save(
+                'query.rq', 'http://example.test/sparql', 'results.nt'))
+        save.assert_called_once_with(
+            'SELECT * {}', 'http://example.test/sparql', 'results.nt',
+            False, {})
+
+    def test_query_execute_from_file_and_save_propagates_failure(self):
+        q = Query(DATA_DIR, CONFIG_DIR, LOG_DIR, False)
+        with patch.object(q, '_read_query_file',
+                          return_value='SELECT * {}'), \
+                patch.object(q, 'execute_and_save',
+                             return_value=False) as save:
+            self.assertFalse(q.execute_from_file_and_save(
+                'query.rq', 'http://example.test/sparql', 'results.nt'))
+        save.assert_called_once_with(
+            'SELECT * {}', 'http://example.test/sparql', 'results.nt',
+            False, {})
 
     def test_query_execute_from_file_and_save(self):
         QUERY_FILE = 'spo100.q'

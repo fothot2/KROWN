@@ -282,9 +282,5 @@ class Query():
             If the query file cannot be found.
         """
         query = self._read_query_file(query_file)
-        results = self.execute_and_save(query, sparql_endpoint, results_file,
-                                        expect_empty, headers)
-        if results is not None:
-            return True
-
-        return False
+        return self.execute_and_save(query, sparql_endpoint, results_file,
+                                     expect_empty, headers)
