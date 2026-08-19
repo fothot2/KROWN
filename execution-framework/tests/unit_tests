@@ -18,6 +18,7 @@ from csv import DictReader
 sys.path.append('../')
 from bench_executor.logger import Logger  # noqa: E402
 from bench_executor.container import Container  # noqa: E402
+from bench_executor.fuseki import Fuseki  # noqa: E402
 from bench_executor.postgresql import PostgreSQL  # noqa: E402
 from bench_executor.mysql import MySQL  # noqa: E402
 from bench_executor.yarrrml import YARRRML  # noqa: E402
@@ -53,6 +54,141 @@ CASE_INFO_FILE_NAME = 'case-info.txt'
 
 
 class UnitTests(unittest.TestCase):
+    def test_container_readiness_times_out_without_logs(self):
+        container = Container.__new__(Container)
+        container._container_id = 'container-id'
+        container._name = 'Test'
+        container._logger = MagicMock()
+        container._docker = MagicMock()
+        container._docker.logs.return_value = []
+        container.run = MagicMock(return_value=True)
+
+        with patch('bench_executor.container.time', side_effect=[0, 601]):
+            success = container.run_and_wait_for_log('ready')
+
+        self.assertFalse(success)
+        container._logger.error.assert_any_call(
+            'Starting container "Test" timed out!'
+        )
+
+    def test_fuseki_cleanup_data_restores_host_ownership(self):
+        with tempfile.TemporaryDirectory() as directory:
+            database = os.path.join(directory, 'fuseki')
+            os.makedirs(database)
+
+            with patch('bench_executor.fuseki.subprocess.run') as run:
+                success = Fuseki.cleanup_data(directory)
+
+            self.assertTrue(success)
+            command = run.call_args.args[0]
+            self.assertEqual(command[:6], [
+                'docker', 'run', '--rm', '--user', '0:0', '--volume'
+            ])
+            self.assertEqual(command[6], f'{database}:/cleanup')
+            self.assertIn('chmod -R a+rwX /cleanup', command)
+            self.assertTrue(run.call_args.kwargs['check'])
+
+    def test_fuseki_stop_recovers_ownership_after_container_stop(self):
+        fuseki = Fuseki.__new__(Fuseki)
+        fuseki._logger = MagicMock()
+        fuseki._data_path = '/tmp/case/data'
+        calls = []
+
+        def stop_container(instance):
+            calls.append('stop')
+            return True
+
+        def cleanup_data(data_path):
+            calls.append(('cleanup', data_path))
+            return True
+
+        with patch('bench_executor.fuseki.requests.post') as post, \
+                patch.object(Container, 'stop', stop_container), \
+                patch.object(
+                    Fuseki, 'cleanup_data', staticmethod(cleanup_data)
+                ):
+            post.return_value.text = ''
+            post.return_value.raise_for_status.return_value = None
+            success = fuseki.stop()
+
+        self.assertTrue(success)
+        self.assertEqual(calls, [
+            'stop',
+            ('cleanup', '/tmp/case/data'),
+        ])
+
+    def test_fuseki_stop_reports_post_stop_cleanup_failure(self):
+        fuseki = Fuseki.__new__(Fuseki)
+        fuseki._logger = MagicMock()
+        fuseki._data_path = '/tmp/case/data'
+
+        with patch('bench_executor.fuseki.requests.post') as post, \
+                patch.object(Container, 'stop', return_value=True), \
+                patch.object(
+                    Fuseki, 'cleanup_data', return_value=False
+                ):
+            post.return_value.text = ''
+            post.return_value.raise_for_status.return_value = None
+            success = fuseki.stop()
+
+        self.assertFalse(success)
+        fuseki._logger.error.assert_called_once_with(
+            'Failed to restore host ownership of the Fuseki database'
+        )
+
+    def test_executor_clean_calls_resource_cleanup_once(self):
+        class FakeResource:
+            cleanup_data = MagicMock(return_value=True)
+
+        with tempfile.TemporaryDirectory() as directory:
+            os.makedirs(os.path.join(directory, 'data', 'resource'))
+            executor = Executor.__new__(Executor)
+            executor._class_module_mapping = {
+                'FakeResource': SimpleNamespace(FakeResource=FakeResource)
+            }
+            executor._logger = MagicMock()
+            case = {
+                'directory': directory,
+                'data': {
+                    'steps': [
+                        {'resource': 'FakeResource'},
+                        {'resource': 'FakeResource'},
+                    ],
+                },
+            }
+
+            success = executor.clean(case)
+
+            self.assertTrue(success)
+            FakeResource.cleanup_data.assert_called_once_with(
+                os.path.join(directory, 'data')
+            )
+            self.assertFalse(os.path.exists(
+                os.path.join(directory, 'data', 'resource')
+            ))
+
+    def test_executor_clean_stops_after_cleanup_failure(self):
+        class FakeResource:
+            cleanup_data = MagicMock(return_value=False)
+
+        with tempfile.TemporaryDirectory() as directory:
+            persistent = os.path.join(directory, 'data', 'resource')
+            os.makedirs(persistent)
+            executor = Executor.__new__(Executor)
+            executor._class_module_mapping = {
+                'FakeResource': SimpleNamespace(FakeResource=FakeResource)
+            }
+            executor._logger = MagicMock()
+            case = {
+                'directory': directory,
+                'data': {'steps': [{'resource': 'FakeResource'}]},
+            }
+
+            success = executor.clean(case)
+
+            self.assertFalse(success)
+            self.assertTrue(os.path.isdir(persistent))
+
     def test_query_features_classify_comparison_modes(self):
         cases = [
             (

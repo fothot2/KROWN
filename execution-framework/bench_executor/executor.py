@@ -381,6 +381,21 @@ class Executor:
         success : bool
             Whether the cleaning of the case succeeded or not.
         """
+        data_path = os.path.join(case['directory'], 'data')
+        cleaned_resources = set()
+        for step in case['data']['steps']:
+            resource_name = step['resource']
+            if resource_name in cleaned_resources:
+                continue
+            cleaned_resources.add(resource_name)
+            module = self._class_module_mapping[resource_name]
+            resource_class = getattr(module, resource_name)
+            cleanup_data = getattr(resource_class, 'cleanup_data', None)
+            if cleanup_data is not None and not cleanup_data(data_path):
+                self._logger.error(
+                    f'Failed to recover persistent data for "{resource_name}"'
+                )
+                return False
         # Checkpoints
         checkpoint_file = os.path.join(case['directory'], CHECKPOINT_FILE_NAME)
         if os.path.exists(checkpoint_file):
@@ -434,8 +449,9 @@ class Executor:
         active_resources = []
 
         # Make sure we start with a clean setup before the first run
-        if run == 1:
-            self.clean(case)
+        if run == 1 and not self.clean(case):
+            self._logger.error('Failed to clean the case before execution')
+            return False
 
         # create directories
         os.umask(0)

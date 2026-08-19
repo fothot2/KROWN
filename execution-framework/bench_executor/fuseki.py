@@ -8,6 +8,7 @@ service, as a Java web application (WAR file), and as a standalone server.
 """
 
 import os
+import subprocess
 import requests
 import psutil
 from typing import Dict
@@ -16,6 +17,7 @@ from bench_executor.logger import Logger
 
 VERSION = '4.6.1'
 CMD_ARGS = '--tdb2 --update --loc /fuseki/databases/DB /ds'
+DATABASE_CONTAINER_PATH = '/fuseki/databases/DB'
 
 
 class Fuseki(Container):
@@ -58,6 +60,34 @@ class Fuseki(Container):
                                   f'{self._data_path}/fuseki:'
                                   '/fuseki/databases/DB'])
         self._endpoint = 'http://localhost:3030/ds/sparql'
+
+    @staticmethod
+    def cleanup_data(data_path: str) -> bool:
+        """Restore host ownership of stale container-created database files."""
+        data_root = os.path.realpath(os.path.abspath(data_path))
+        database_path = os.path.realpath(os.path.join(data_root, 'fuseki'))
+        if os.path.commonpath([data_root, database_path]) != data_root:
+            raise ValueError('Fuseki database path leaves the data directory')
+        if not os.path.exists(database_path):
+            return True
+
+        command = [
+            'docker', 'run', '--rm', '--user', '0:0',
+            '--volume', f'{database_path}:/cleanup',
+            '--entrypoint', 'sh', f'kgconstruct/fuseki:v{VERSION}',
+            '-c', 'chmod -R a+rwX /cleanup',
+        ]
+        try:
+            subprocess.run(
+                command,
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            return True
+        except (OSError, subprocess.CalledProcessError):
+            return False
 
     def initialization(self) -> bool:
         """Initialize Fuseki's database.
@@ -189,7 +219,14 @@ class Fuseki(Container):
             self._logger.error(f'Failed to drop RDF: "{e}" from Fuseki')
             return False
 
-        return super().stop()
+        if not super().stop():
+            return False
+        if not self.cleanup_data(self._data_path):
+            self._logger.error(
+                'Failed to restore host ownership of the Fuseki database'
+            )
+            return False
+        return True
 
     @property
     def endpoint(self):
