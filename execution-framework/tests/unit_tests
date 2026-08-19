@@ -5,6 +5,7 @@ import sys
 import unittest
 import filecmp
 import subprocess
+import tempfile
 import requests
 import psycopg2
 import pymysql
@@ -19,6 +20,8 @@ from bench_executor.yarrrml import YARRRML  # noqa: E402
 from bench_executor.collector import Collector, METRICS_FILE_NAME  # noqa: E402
 from bench_executor.stats import Stats, METRICS_AGGREGATED_FILE_NAME, \
         METRICS_SUMMARY_FILE_NAME  # noqa: E402
+from bench_executor.executor import _declared_artifact_path, \
+        _move_declared_artifact  # noqa: E402
 
 LOG_DIR = os.path.join(os.path.dirname(__file__), '..', 'bench_executor',
                        'log')
@@ -30,6 +33,79 @@ CASE_INFO_FILE_NAME = 'case-info.txt'
 
 
 class UnitTests(unittest.TestCase):
+    def test_declared_artifact_path_accepts_any_extension(self):
+        with tempfile.TemporaryDirectory() as directory:
+            shared = os.path.join(directory, 'shared')
+            os.makedirs(shared)
+            artifact = os.path.join(shared, 'data.vortex')
+            with open(artifact, 'wb') as stream:
+                stream.write(b'vortex')
+
+            resolved = _declared_artifact_path(
+                shared, 'data.vortex'
+            )
+
+            self.assertEqual(resolved, os.path.realpath(artifact))
+
+    def test_declared_artifact_path_rejects_absolute_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            shared = os.path.join(directory, 'shared')
+            os.makedirs(shared)
+
+            with self.assertRaises(ValueError):
+                _declared_artifact_path(
+                    shared, os.path.join(directory, 'data.vortex')
+                )
+
+    def test_declared_artifact_path_rejects_parent_traversal(self):
+        with tempfile.TemporaryDirectory() as directory:
+            shared = os.path.join(directory, 'shared')
+            os.makedirs(shared)
+            outside = os.path.join(directory, 'outside.vortex')
+            with open(outside, 'wb') as stream:
+                stream.write(b'outside')
+
+            with self.assertRaises(ValueError):
+                _declared_artifact_path(
+                    shared, os.path.join('..', 'outside.vortex')
+                )
+
+    def test_declared_artifact_path_rejects_missing_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            shared = os.path.join(directory, 'shared')
+            os.makedirs(shared)
+
+            with self.assertRaises(FileNotFoundError):
+                _declared_artifact_path(shared, 'missing.vortex')
+
+    def test_declared_artifact_path_rejects_directory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            shared = os.path.join(directory, 'shared')
+            os.makedirs(os.path.join(shared, 'artifact'))
+
+            with self.assertRaises(FileNotFoundError):
+                _declared_artifact_path(shared, 'artifact')
+
+    def test_move_declared_artifact_keeps_nested_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            shared = os.path.join(directory, 'shared')
+            results = os.path.join(directory, 'results')
+            source_directory = os.path.join(shared, 'raw')
+            os.makedirs(source_directory)
+            source = os.path.join(source_directory, 'queries.jsonl')
+            with open(source, 'w', encoding='utf-8') as stream:
+                stream.write('{"status":"ok"}\n')
+
+            _move_declared_artifact(
+                shared, results, os.path.join('raw', 'queries.jsonl')
+            )
+
+            destination = os.path.join(
+                results, 'raw', 'queries.jsonl'
+            )
+            self.assertFalse(os.path.exists(source))
+            self.assertTrue(os.path.isfile(destination))
+
     def test_docker_run(self):
         logger = Logger('test_docker_run', LOG_DIR, True)
         c = Container('nginx:alpine', 'test_docker_run', logger,

@@ -29,6 +29,58 @@ WAIT_TIME = 15  # seconds
 CHECKPOINT_FILE_NAME = '.done'
 
 
+def _declared_artifact_path(shared_directory: str,
+                            declared_path: str) -> str:
+    """Resolve one declared file inside the shared data directory."""
+    if not isinstance(declared_path, str) or not declared_path:
+        raise ValueError('Artifact path must be a non-empty string')
+
+    if os.path.isabs(declared_path):
+        raise ValueError(
+            f'Artifact path must be relative: {declared_path}'
+        )
+
+    shared_directory = os.path.realpath(shared_directory)
+    artifact_path = os.path.realpath(
+        os.path.join(shared_directory, declared_path)
+    )
+
+    try:
+        inside_shared_directory = os.path.commonpath(
+            [shared_directory, artifact_path]
+        ) == shared_directory
+    except ValueError as error:
+        raise ValueError(
+            f'Invalid artifact path: {declared_path}'
+        ) from error
+
+    if not inside_shared_directory:
+        raise ValueError(
+            f'Artifact path leaves the shared directory: {declared_path}'
+        )
+
+    if not os.path.isfile(artifact_path):
+        raise FileNotFoundError(
+            f'Artifact is not an existing file: {declared_path}'
+        )
+
+    return artifact_path
+
+
+def _move_declared_artifact(shared_directory: str,
+                            results_directory: str,
+                            declared_path: str) -> None:
+    """Move one declared artifact and keep its relative path."""
+    source_path = _declared_artifact_path(
+        shared_directory, declared_path
+    )
+    destination_path = os.path.join(
+        results_directory, declared_path
+    )
+    os.makedirs(os.path.dirname(destination_path), exist_ok=True)
+    shutil.move(source_path, destination_path)
+
+
 # Dummy callback in case no callback was provided
 def _progress_cb(resource: str, name: str, success: bool):
     pass
@@ -499,28 +551,23 @@ class Executor:
                 parameters = step['parameters']
                 os.makedirs(os.path.join(results_run_path, subdir),
                             exist_ok=True)
+                shared_directory = os.path.join(data_path, 'shared')
+                results_directory = os.path.join(results_run_path, subdir)
+
                 if parameters.get('results_file', False):
-                    results_file = parameters['results_file']
-                    p1 = os.path.join(directory, 'data/shared', results_file)
-                    p2 = os.path.join(results_run_path, subdir, results_file)
-                    try:
-                        shutil.move(p1, p2)
-                    except FileNotFoundError as e:
-                        msg = f'Cannot find results file "{p1}": {e}'
-                        self._logger.warning(msg)
+                    _move_declared_artifact(
+                        shared_directory,
+                        results_directory,
+                        parameters['results_file'],
+                    )
 
                 if parameters.get('output_file', False) \
                         and not parameters.get('multiple_files', False):
-                    output_dir = os.path.join(results_run_path, subdir)
-                    for out_file in glob(os.path.join(str(directory), 'data',
-                                         'shared', '*.nt')):
-                        out_path = os.path.join(output_dir,
-                                                os.path.basename(out_file))
-                        try:
-                            shutil.move(out_file, out_path)
-                        except FileNotFoundError as e:
-                            msg = f'Cannot find output file "{out_file}": {e}'
-                            self._logger.warning(msg)
+                    _move_declared_artifact(
+                        shared_directory,
+                        results_directory,
+                        parameters['output_file'],
+                    )
 
             # Run complete, mark it
             run_checkpoint_file = os.path.join(results_run_path,
