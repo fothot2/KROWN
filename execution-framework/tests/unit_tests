@@ -6,6 +6,8 @@ import unittest
 import filecmp
 import subprocess
 import tempfile
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 import requests
 import psycopg2
 import pymysql
@@ -20,8 +22,8 @@ from bench_executor.yarrrml import YARRRML  # noqa: E402
 from bench_executor.collector import Collector, METRICS_FILE_NAME  # noqa: E402
 from bench_executor.stats import Stats, METRICS_AGGREGATED_FILE_NAME, \
         METRICS_SUMMARY_FILE_NAME  # noqa: E402
-from bench_executor.executor import _declared_artifact_path, \
-        _move_declared_artifact  # noqa: E402
+from bench_executor.executor import Executor, \
+        _declared_artifact_path, _move_declared_artifact  # noqa: E402
 
 LOG_DIR = os.path.join(os.path.dirname(__file__), '..', 'bench_executor',
                        'log')
@@ -33,6 +35,86 @@ CASE_INFO_FILE_NAME = 'case-info.txt'
 
 
 class UnitTests(unittest.TestCase):
+    def test_executor_retains_may_fail_step_failure(self):
+        class FakeResource:
+            def __init__(self, data_path, config_dir, log_dir, verbose):
+                pass
+
+            def execute(self, succeed):
+                return succeed
+
+            def stop(self):
+                pass
+
+        class FakeCollector:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def next_step(self):
+                pass
+
+            def stop(self):
+                pass
+
+        with tempfile.TemporaryDirectory() as directory:
+            with open(os.path.join(directory, 'log.txt'),
+                      'w', encoding='utf-8'):
+                pass
+
+            executor = Executor.__new__(Executor)
+            executor._class_module_mapping = {
+                'FakeResource': SimpleNamespace(
+                    FakeResource=FakeResource
+                )
+            }
+            executor._verbose = False
+            executor._logger = MagicMock()
+            executor._progress_cb = MagicMock()
+            executor.clean = MagicMock(return_value=True)
+
+            case = {
+                'directory': directory,
+                'data': {
+                    'name': 'cumulative-status',
+                    'steps': [
+                        {
+                            'name': 'expected failure',
+                            'resource': 'FakeResource',
+                            'command': 'execute',
+                            'parameters': {'succeed': False},
+                            'may_fail': True,
+                        },
+                        {
+                            'name': 'later success',
+                            'resource': 'FakeResource',
+                            'command': 'execute',
+                            'parameters': {'succeed': True},
+                        },
+                    ],
+                },
+            }
+
+            with patch('bench_executor.executor.Collector', FakeCollector), \
+                    patch('bench_executor.executor.sleep'):
+                success = executor.run(
+                    case, interval=0.1, run=2, checkpoint=True
+                )
+
+            self.assertFalse(success)
+            self.assertFalse(os.path.exists(os.path.join(
+                directory, 'results', 'run_2', '.done'
+            )))
+            self.assertFalse(os.path.exists(os.path.join(
+                directory, '.done'
+            )))
+            self.assertEqual(executor._progress_cb.call_count, 4)
+            executor._progress_cb.assert_any_call(
+                'FakeResource', 'expected failure', False
+            )
+            executor._progress_cb.assert_any_call(
+                'FakeResource', 'later success', True
+            )
+
     def test_declared_artifact_path_accepts_any_extension(self):
         with tempfile.TemporaryDirectory() as directory:
             shared = os.path.join(directory, 'shared')

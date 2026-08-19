@@ -423,7 +423,7 @@ class Executor:
         success : bool
             Whether the case was executed successfully or not.
         """
-        success = True
+        run_success = True
         data = case['data']
         directory = case['directory']
         data_path = os.path.join(directory, 'data')
@@ -457,7 +457,7 @@ class Executor:
                     return False
 
                 self._logger.debug(f'Resource {step["resource"]} initialized')
-                self._progress_cb('Initializing', step['resource'], success)
+                self._progress_cb('Initializing', step['resource'], True)
 
         # Launch metrics collection
         collector = Collector(data['name'], results_run_path, interval,
@@ -466,7 +466,7 @@ class Executor:
 
         # Execute steps
         for index, step in enumerate(data['steps']):
-            success = True
+            step_success = True
             module = self._class_module_mapping[step['resource']]
             resource = getattr(module, step['resource'])(data_path, CONFIG_DIR,
                                                          directory,
@@ -476,17 +476,21 @@ class Executor:
             # Containers may need to start up first before executing a command
             if hasattr(resource, 'wait_until_ready'):
                 if not resource.wait_until_ready():
-                    success = False
+                    step_success = False
+                    run_success = False
                     self._logger.error('Waiting until resource '
                                        f'"{step["resource"]} is ready failed')
-                    self._progress_cb(step['resource'], step['name'], success)
+                    self._progress_cb(
+                        step['resource'], step['name'], step_success
+                    )
                     break
                 self._logger.debug(f'Resource {step["resource"]} ready')
 
             # Execute command
             command = getattr(resource, step['command'])
             if not command(**step['parameters']):
-                success = False
+                step_success = False
+                run_success = False
                 msg = f'Executing command "{step["command"]}" ' + \
                       f'failed for resource "{step["resource"]}"'
                 # Some steps are non-critical like queries, they may fail but
@@ -494,17 +498,17 @@ class Executor:
                 # failures if the may_fail key is present
                 if step.get('may_fail', False):
                     self._logger.warning(msg)
-                    self._progress_cb(step['resource'], step['name'], success)
+                    self._progress_cb(step['resource'], step['name'], step_success)
                     continue
                 else:
                     self._logger.error(msg)
-                    self._progress_cb(step['resource'], step['name'], success)
+                    self._progress_cb(step['resource'], step['name'], step_success)
                     break
             self._logger.debug(f'Command "{step["command"]}" executed on '
                                f'resource {step["resource"]}')
 
             # Step complete
-            self._progress_cb(step['resource'], step['name'], success)
+            self._progress_cb(step['resource'], step['name'], step_success)
 
             # Step finished, let metric collector know
             if (index + 1) < len(data['steps']):
@@ -522,7 +526,7 @@ class Executor:
         self._progress_cb('Cleaner', 'Clean up resources', True)
 
         # Mark checkpoint if necessary
-        if checkpoint and success:
+        if checkpoint and run_success:
             self._logger.debug('Writing checkpoint...')
             with open(checkpoint_file, 'w') as f:
                 d = datetime.now().replace(microsecond=0).isoformat()
@@ -544,7 +548,7 @@ class Executor:
         self._logger.debug('Copied metric measurements to run results path')
 
         # Results: all 'output_file' and 'result_file' values
-        if success:
+        if run_success:
             self._logger.debug('Copying generated files for run')
             for step in data['steps']:
                 subdir = step['resource'].lower().replace('_', '')
@@ -582,7 +586,7 @@ class Executor:
                           True)
         sleep(WAIT_TIME)
 
-        return success
+        return run_success
 
     def list(self) -> list:
         """List all cases in a root directory.
