@@ -32,6 +32,9 @@ from bench_executor.benchmark_result import SCHEMA_VERSION, \
 from bench_executor.rdf_query_benchmark import _load_query_manifest, \
         _QueryOutcome, _QueryTimeoutError, _RdfQueryAdapter, \
         _RdfQueryBenchmark  # noqa: E402
+from bench_executor.rdflib_query_benchmark import _resolve_input_path, \
+        _resolve_output_path, _RdfLibAdapter, \
+        RdfLibQueryBenchmark  # noqa: E402
 
 LOG_DIR = os.path.join(os.path.dirname(__file__), '..', 'bench_executor',
                        'log')
@@ -43,6 +46,123 @@ CASE_INFO_FILE_NAME = 'case-info.txt'
 
 
 class UnitTests(unittest.TestCase):
+    def test_rdflib_paths_accept_shared_and_absolute_inputs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            shared = os.path.join(directory, 'shared')
+            os.makedirs(shared)
+            shared_file = os.path.join(shared, 'manifest.json')
+            absolute_file = os.path.join(directory, 'data.vortex')
+            for path in (shared_file, absolute_file):
+                with open(path, 'w', encoding='utf-8') as stream:
+                    stream.write('{}')
+
+            self.assertEqual(
+                _resolve_input_path(shared, 'manifest.json'),
+                os.path.realpath(shared_file),
+            )
+            self.assertEqual(
+                _resolve_input_path(shared, absolute_file),
+                os.path.realpath(absolute_file),
+            )
+
+    def test_rdflib_output_rejects_path_escape(self):
+        with tempfile.TemporaryDirectory() as directory:
+            shared = os.path.join(directory, 'shared')
+            os.makedirs(shared)
+
+            with self.assertRaises(ValueError):
+                _resolve_output_path(shared, '../results.jsonl')
+            with self.assertRaises(ValueError):
+                _resolve_output_path(
+                    shared, os.path.join(directory, 'results.jsonl')
+                )
+
+    def test_rdflib_adapter_consumes_complete_result(self):
+        class FakeResult:
+            def __init__(self):
+                self.consumed = 0
+
+            def __iter__(self):
+                for value in range(3):
+                    self.consumed += 1
+                    yield value
+
+        class FakeGraph:
+            def __init__(self):
+                self.result = FakeResult()
+                self.closed = False
+
+            def query(self, query):
+                return self.result
+
+            def close(self):
+                self.closed = True
+
+        adapter = _RdfLibAdapter('cottas', '/tmp/unused', 'unused')
+        graph = FakeGraph()
+        adapter._graph = graph
+
+        outcome = adapter.execute('SELECT * WHERE { ?s ?p ?o }')
+        adapter.close()
+
+        self.assertEqual(outcome.result_count, 3)
+        self.assertEqual(graph.result.consumed, 3)
+        self.assertTrue(graph.closed)
+
+    def test_rdflib_krown_resource_writes_results(self):
+        class FakeAdapter(_RdfQueryAdapter):
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def open(self):
+                pass
+
+            def execute(self, query):
+                return _QueryOutcome(
+                    result_count=0 if 'LIMIT 0' in query else 2
+                )
+
+            def close(self):
+                pass
+
+        with tempfile.TemporaryDirectory() as directory:
+            data_path = os.path.join(directory, 'data')
+            shared = os.path.join(data_path, 'shared')
+            os.makedirs(shared)
+            artifact = os.path.join(shared, 'data.vortex')
+            with open(artifact, 'wb') as stream:
+                stream.write(b'test')
+            self._write_query_manifest(shared)
+
+            resource = RdfLibQueryBenchmark(
+                data_path, directory, directory, False
+            )
+            with patch(
+                    'bench_executor.rdflib_query_benchmark._RdfLibAdapter',
+                    FakeAdapter):
+                success = resource.execute(
+                    engine='vortex',
+                    artifact_file='data.vortex',
+                    manifest_file='queries.json',
+                    results_file='raw/results.jsonl',
+                    experiment_id='smoke',
+                    system='fake-vortex',
+                    warmup_runs=0,
+                    measured_runs=1,
+                )
+
+            self.assertTrue(success)
+            result_path = os.path.join(
+                shared, 'raw', 'results.jsonl'
+            )
+            self.assertTrue(os.path.isfile(result_path))
+            with open(result_path, 'r', encoding='utf-8') as stream:
+                records = [json.loads(line) for line in stream]
+            self.assertEqual(len(records), 2)
+            self.assertEqual(
+                [record['result_count'] for record in records], [2, 0]
+            )
+
     @staticmethod
     def _write_query_manifest(directory):
         path = os.path.join(directory, 'queries.json')
