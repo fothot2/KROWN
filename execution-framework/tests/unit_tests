@@ -8,6 +8,7 @@ import subprocess
 import tempfile
 import json
 import hashlib
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 import requests
@@ -43,6 +44,7 @@ from bench_executor.sparql_http_benchmark import _SparqlHttpAdapter, \
 from bench_executor.rdflib_query_benchmark import _resolve_input_path, \
         _resolve_output_path, _RdfLibAdapter, _WorkerRdfLibAdapter, \
         RdfLibQueryBenchmark  # noqa: E402
+from bench_executor.dbbench_manifest import build_inventory, convert, convert_records  # noqa: E402
 
 LOG_DIR = os.path.join(os.path.dirname(__file__), '..', 'bench_executor',
                        'log')
@@ -1359,6 +1361,69 @@ class UnitTests(unittest.TestCase):
         f2 = metrics_summary_expected_file
         self.assertTrue(filecmp.cmp(f1, f2, shallow=False))
 
+
+    def source(self, **updates):
+            record = {
+                'query_id': 'TP/dbpedia/a.txt::q0000',
+                'relative_path': 'TP/dbpedia/a.txt',
+                'top_group': 'TP',
+                'dataset': 'dbpedia',
+                'size_group': None,
+                'file_name': 'a.txt',
+                'query_index_in_file': 0,
+                'line_no': 1,
+                'contains_limit': False,
+                'query': 'SELECT ?s WHERE { ?s ?p ?o . }',
+            }
+            record.update(updates)
+            return record
+
+    def test_conversion_is_loader_compatible(self):
+            manifest = convert_records([self.source()], 'dbbench-tp', 'dbpedia')
+            self.assertEqual(manifest['query_count'], 1)
+            self.assertEqual(manifest['queries'][0]['query_parse_status'], 'ok')
+            with tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / 'manifest.json'
+                path.write_text(json.dumps(manifest), encoding='utf-8')
+                loaded = _load_query_manifest(str(path))
+                self.assertEqual(loaded.queries[0].query, self.source()['query'])
+
+    def test_duplicate_identifier_fails(self):
+            with self.assertRaisesRegex(ValueError, 'duplicate query_id'):
+                convert_records([self.source(), self.source()], 'w', 'dbpedia')
+
+    def test_duplicate_content_is_reported(self):
+            second = self.source(query_id='TP/dbpedia/a.txt::q0001', query_index_in_file=1, line_no=2)
+            manifest = convert_records([self.source(), second], 'w', 'dbpedia')
+            self.assertEqual(len(manifest['duplicate_query_content']), 1)
+
+    def test_parse_failure_is_preserved(self):
+            manifest = convert_records([self.source(query='SELECT broken')], 'w', 'dbpedia')
+            query = manifest['queries'][0]
+            self.assertEqual(query['query_parse_status'], 'error')
+            self.assertEqual(query['comparison_mode'], 'unsupported')
+
+    def test_source_tree_matches_dbbench_rules(self):
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                target = root / 'JOINS/dbpedia/small/j.txt'
+                target.parent.mkdir(parents=True)
+                target.write_text('\nSELECT ?s WHERE { ?s ?p ?o . }\nASK { ?s ?p ?o }\n', encoding='utf-8')
+                records = build_inventory(root, 'dbpedia', ['JOINS'], ['small'])
+                self.assertEqual(len(records), 1)
+                self.assertEqual(records[0]['line_no'], 2)
+                self.assertEqual(records[0]['size_group'], 'small')
+
+    def test_atomic_failure_keeps_existing_output(self):
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                inventory = root / 'inventory.json'
+                output = root / 'manifest.json'
+                inventory.write_text('[]', encoding='utf-8')
+                output.write_text('original', encoding='utf-8')
+                with self.assertRaisesRegex(ValueError, 'no queries'):
+                    convert(output=output, workload='w', dataset='dbpedia', inventory=inventory)
+                self.assertEqual(output.read_text(encoding='utf-8'), 'original')
 
 if __name__ == '__main__':
     # SELinux causes weird permission denied issues, warn users
