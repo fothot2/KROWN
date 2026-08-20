@@ -1,0 +1,26 @@
+[
+  {
+    "contains_limit": false,
+    "dataset": "tiny",
+    "file_name": "select.txt",
+    "line_no": 1,
+    "query": "SELECT ?s WHERE { ?s <http://example/p> <http://example/b> }",
+    "query_id": "tiny-select",
+    "query_index_in_file": 0,
+    "relative_path": "TP/tiny/select.txt",
+    "size_group": null,
+    "top_group": "TP"
+  },
+  {
+    "contains_limit": false,
+    "dataset": "tiny",
+    "file_name": "empty.txt",
+    "line_no": 1,
+    "query": "SELECT ?s WHERE { ?s <http://example/missing> ?o }",
+    "query_id": "tiny-empty",
+    "query_index_in_file": 0,
+    "relative_path": "TP/tiny/empty.txt",
+    "size_group": null,
+    "top_group": "TP"
+  }
+]

@@ -1,0 +1,36 @@
+{
+  "@id": "https://w3id.org/krown/benchmark-integration/dbbench-execution",
+  "description": "Prepare and execute a tiny DBBench workload through the public standalone benchmark interface.",
+  "name": "Portable DBBench execution",
+  "steps": [
+    {
+      "@id": "https://w3id.org/krown/benchmark-integration/dbbench-execution/prepare",
+      "command": "execute",
+      "name": "Prepare tiny DBBench manifest",
+      "parameters": {
+        "benchmark_command": "vortex-rdf-bench",
+        "dataset": "tiny",
+        "inventory_file": "inventory.json",
+        "output_file": "manifests/tiny.json",
+        "workload": "dbbench-tiny"
+      },
+      "resource": "DBBenchManifestResource"
+    },
+    {
+      "@id": "https://w3id.org/krown/benchmark-integration/dbbench-execution/run",
+      "command": "execute",
+      "name": "Execute tiny DBBench manifest",
+      "parameters": {
+        "benchmark_command": "vortex-rdf-bench",
+        "dataset_file": "dataset.ttl",
+        "experiment_id": "dbbench-tiny-rdflib",
+        "manifest_file": "manifests/tiny.json",
+        "measured_runs": 2,
+        "results_file": "raw/results.jsonl",
+        "timeout_s": 10.0,
+        "warmup_runs": 1
+      },
+      "resource": "DBBenchQueryResource"
+    }
+  ]
+}
