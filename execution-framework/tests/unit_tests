@@ -46,6 +46,7 @@ from bench_executor.rdflib_query_benchmark import _resolve_input_path, \
         _resolve_output_path, _RdfLibAdapter, _WorkerRdfLibAdapter, \
         RdfLibQueryBenchmark  # noqa: E402
 from bench_executor.dbbench_manifest_resource import DBBenchManifestResource  # noqa: E402
+from bench_executor.dbbench_query_resource import DBBenchQueryResource  # noqa: E402
 
 LOG_DIR = os.path.join(os.path.dirname(__file__), '..', 'bench_executor',
                        'log')
@@ -1498,6 +1499,82 @@ class UnitTests(unittest.TestCase):
                 dataset='dbpedia', inventory_file='inventory.json',
                 benchmark_command='definitely-missing-vortex-rdf-bench',
             ))
+
+    def test_dbbench_query_resource_runs_public_cli(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            shared = root / 'data/shared'
+            shared.mkdir(parents=True)
+            dataset = shared / 'data.ttl'
+            dataset.write_text(
+                '@prefix ex: <http://example/> . ex:a ex:p ex:b .\n',
+                encoding='utf-8',
+            )
+            manifest = shared / 'manifest.json'
+            manifest.write_text(json.dumps({
+                'schema_version': 1,
+                'workload': 'tiny',
+                'dataset': 'tiny',
+                'query_count': 1,
+                'queries': [{
+                    'query_id': 'q1',
+                    'query': 'SELECT ?s WHERE { ?s <http://example/p> <http://example/b> }',
+                    'query_result_type': 'SELECT',
+                    'comparison_mode': 'unordered_fingerprint',
+                }],
+            }), encoding='utf-8')
+            resource = DBBenchQueryResource(
+                str(root / 'data'), directory, directory, False
+            )
+            self.assertTrue(resource.execute(
+                manifest_file='manifest.json', dataset_file='data.ttl',
+                results_file='raw/results.jsonl', experiment_id='tiny-run',
+                warmup_runs=1, measured_runs=2,
+                benchmark_root='/users/u0182905/benchmarks',
+            ))
+            resource._logger.close()
+            output = shared / 'raw/results.jsonl'
+            records = [
+                json.loads(line) for line in output.read_text(
+                    encoding='utf-8'
+                ).splitlines()
+            ]
+            self.assertEqual(len(records), 3)
+            self.assertEqual(
+                [(record['phase'], record['run']) for record in records],
+                [('warmup', 0), ('measured', 0), ('measured', 1)],
+            )
+
+    def test_dbbench_query_resource_rejects_unsafe_paths(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            shared = root / 'data/shared'
+            shared.mkdir(parents=True)
+            resource = DBBenchQueryResource(
+                str(root / 'data'), directory, directory, False
+            )
+            self.assertFalse(resource.execute(
+                manifest_file='../manifest.json', dataset_file='data.ttl',
+                results_file='results.jsonl', experiment_id='unsafe',
+            ))
+            resource._logger.close()
+
+    def test_dbbench_query_resource_reports_missing_command(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            shared = root / 'data/shared'
+            shared.mkdir(parents=True)
+            (shared / 'manifest.json').write_text('{}', encoding='utf-8')
+            (shared / 'data.ttl').write_text('', encoding='utf-8')
+            resource = DBBenchQueryResource(
+                str(root / 'data'), directory, directory, False
+            )
+            self.assertFalse(resource.execute(
+                manifest_file='manifest.json', dataset_file='data.ttl',
+                results_file='results.jsonl', experiment_id='missing',
+                benchmark_command='definitely-missing-vortex-rdf-bench',
+            ))
+            resource._logger.close()
 
 if __name__ == '__main__':
     # SELinux causes weird permission denied issues, warn users
