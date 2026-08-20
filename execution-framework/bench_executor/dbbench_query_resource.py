@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 
+from bench_executor.benchmark_result import validate_query_record
 from bench_executor.logger import Logger
 from bench_executor.standalone_benchmark import (
     commit_output, discard_output, input_file, resolve_shared_path,
@@ -38,21 +39,12 @@ def _load_results(path: Path) -> list[dict]:
                 raise ValueError(
                     f'Invalid JSONL record at line {line_number}: {error}'
                 ) from error
-            if not isinstance(record, dict):
+            try:
+                record = validate_query_record(record)
+            except (TypeError, ValueError) as error:
                 raise ValueError(
-                    f'Result at line {line_number} must be an object'
-                )
-            required = {
-                'schema_version', 'experiment_id', 'system', 'dataset',
-                'workload', 'query_id', 'phase', 'run', 'order', 'status',
-                'elapsed_ns', 'manifest_sha256', 'dataset_sha256',
-            }
-            missing = sorted(required.difference(record))
-            if missing:
-                raise ValueError(
-                    f'Result at line {line_number} misses: '
-                    + ', '.join(missing)
-                )
+                    f'Invalid result record at line {line_number}: {error}'
+                ) from error
             records.append(record)
     if not records:
         raise ValueError('Result file must contain at least one record')
