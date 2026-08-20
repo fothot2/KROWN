@@ -10,7 +10,6 @@
       "parameters": {
         "benchmark_command": "vortex-rdf-bench",
         "dataset": "dbpedia",
-        "implementation": "standalone",
         "inventory_file": "dbbench/canonical-inventory.json",
         "output_file": "manifests/dbbench.json",
         "workload": "dbbench-tp-joins"

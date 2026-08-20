@@ -45,8 +45,6 @@ from bench_executor.sparql_http_benchmark import _SparqlHttpAdapter, \
 from bench_executor.rdflib_query_benchmark import _resolve_input_path, \
         _resolve_output_path, _RdfLibAdapter, _WorkerRdfLibAdapter, \
         RdfLibQueryBenchmark  # noqa: E402
-from bench_executor.dbbench_manifest import build_inventory, convert, convert_records  # noqa: E402
-from bench_executor.dbbench_manifest import query_tree_provenance  # noqa: E402
 from bench_executor.dbbench_manifest_resource import DBBenchManifestResource  # noqa: E402
 
 LOG_DIR = os.path.join(os.path.dirname(__file__), '..', 'bench_executor',
@@ -1407,66 +1405,6 @@ class UnitTests(unittest.TestCase):
         record.update(updates)
         return record
 
-    def test_dbbench_manifest_conversion_is_loader_compatible(self):
-        source = self._dbbench_source_record()
-        manifest = convert_records([source], 'dbbench-tp', 'dbpedia')
-        self.assertEqual(manifest['query_count'], 1)
-        self.assertEqual(manifest['queries'][0]['query_parse_status'], 'ok')
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / 'manifest.json'
-            path.write_text(json.dumps(manifest), encoding='utf-8')
-            loaded = _load_query_manifest(str(path))
-            self.assertEqual(loaded.queries[0].query, source['query'])
-
-    def test_dbbench_manifest_rejects_duplicate_identifier(self):
-        source = self._dbbench_source_record()
-        with self.assertRaisesRegex(ValueError, 'duplicate query_id'):
-            convert_records([source, source], 'w', 'dbpedia')
-
-    def test_dbbench_manifest_reports_duplicate_content(self):
-        first = self._dbbench_source_record()
-        second = self._dbbench_source_record(
-            query_id='TP/dbpedia/a.txt::q0001',
-            query_index_in_file=1,
-            line_no=2,
-        )
-        manifest = convert_records([first, second], 'w', 'dbpedia')
-        self.assertEqual(len(manifest['duplicate_query_content']), 1)
-
-    def test_dbbench_manifest_preserves_parse_failure(self):
-        source = self._dbbench_source_record(query='SELECT broken')
-        query = convert_records([source], 'w', 'dbpedia')['queries'][0]
-        self.assertEqual(query['query_parse_status'], 'error')
-        self.assertEqual(query['comparison_mode'], 'unsupported')
-
-    def test_dbbench_manifest_scans_source_tree(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            target = root / 'JOINS/dbpedia/small/j.txt'
-            target.parent.mkdir(parents=True)
-            target.write_text(
-                '\nSELECT ?s WHERE { ?s ?p ?o . }\nASK { ?s ?p ?o }\n',
-                encoding='utf-8',
-            )
-            records = build_inventory(root, 'dbpedia', ['JOINS'], ['small'])
-            self.assertEqual(len(records), 1)
-            self.assertEqual(records[0]['line_no'], 2)
-            self.assertEqual(records[0]['size_group'], 'small')
-
-    def test_dbbench_manifest_keeps_output_after_failure(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            inventory = root / 'inventory.json'
-            output = root / 'manifest.json'
-            inventory.write_text('[]', encoding='utf-8')
-            output.write_text('original', encoding='utf-8')
-            with self.assertRaisesRegex(ValueError, 'no queries'):
-                convert(
-                    output=output, workload='w', dataset='dbpedia',
-                    inventory=inventory,
-                )
-            self.assertEqual(output.read_text(encoding='utf-8'), 'original')
-
     def test_dbbench_resource_inventory_and_selection(self):
         with tempfile.TemporaryDirectory() as directory:
             shared = Path(directory) / 'data/shared'
@@ -1541,29 +1479,9 @@ class UnitTests(unittest.TestCase):
             self.assertTrue(resource.execute(
                 output_file='standalone.json', workload='dbbench',
                 dataset='dbpedia', inventory_file='inventory.json',
-                implementation='standalone',
                 benchmark_root='/users/u0182905/benchmarks',
             ))
             self.assertTrue((shared / 'standalone.json').is_file())
-
-    def test_dbbench_resource_verify_matches_legacy(self):
-        with tempfile.TemporaryDirectory() as directory:
-            shared = Path(directory) / 'data/shared'
-            shared.mkdir(parents=True)
-            (shared / 'inventory.json').write_text(
-                json.dumps([self._dbbench_source_record()]), encoding='utf-8'
-            )
-            resource = DBBenchManifestResource(
-                str(Path(directory) / 'data'), directory, directory, False
-            )
-            self.assertTrue(resource.execute(
-                output_file='verify.json', workload='dbbench',
-                dataset='dbpedia', inventory_file='inventory.json',
-                implementation='verify',
-                benchmark_root='/users/u0182905/benchmarks',
-            ))
-            leftovers = list(shared.glob('.verify.json.legacy.*.json'))
-            self.assertEqual(leftovers, [])
 
     def test_dbbench_resource_reports_missing_public_command(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -1578,7 +1496,6 @@ class UnitTests(unittest.TestCase):
             self.assertFalse(resource.execute(
                 output_file='missing.json', workload='dbbench',
                 dataset='dbpedia', inventory_file='inventory.json',
-                implementation='standalone',
                 benchmark_command='definitely-missing-vortex-rdf-bench',
             ))
 
