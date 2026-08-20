@@ -11,28 +11,10 @@ import subprocess
 import sys
 
 from bench_executor.logger import Logger
+from bench_executor.standalone_benchmark import (
+    input_file, resolve_shared_path, standalone_command,
+)
 from bench_executor.rdf_query_benchmark import _load_query_manifest
-
-
-def _resolve_shared_path(shared: str, declared: str, kind: str) -> Path:
-    if not isinstance(declared, str) or not declared:
-        raise ValueError(f'{kind} path must be a non-empty string')
-    if os.path.isabs(declared):
-        raise ValueError(f'{kind} path must be relative')
-    shared_path = Path(shared).resolve()
-    path = (shared_path / declared).resolve()
-    if os.path.commonpath((str(shared_path), str(path))) != str(shared_path):
-        raise ValueError(
-            f'{kind} path leaves the shared directory: {declared}'
-        )
-    return path
-
-
-def _input_file(shared: str, declared: str) -> Path:
-    path = _resolve_shared_path(shared, declared, 'Input')
-    if not path.is_file():
-        raise FileNotFoundError(f'Input is not an existing file: {declared}')
-    return path
 
 
 def _sha256_file(path: Path) -> str:
@@ -95,29 +77,6 @@ class DBBenchQueryResource:
     def root_mount_directory(self) -> str:
         return __name__.lower()
 
-    def _standalone_command(self, benchmark_command: str,
-                            benchmark_root: str | None) -> tuple[list[str], dict]:
-        environment = os.environ.copy()
-        if benchmark_root is not None:
-            root = Path(benchmark_root).resolve()
-            if not (root / 'benchmark_core/cli.py').is_file():
-                raise FileNotFoundError(
-                    f'benchmark_root does not contain benchmark_core: {root}'
-                )
-            current = environment.get('PYTHONPATH')
-            environment['PYTHONPATH'] = (
-                str(root) if not current
-                else str(root) + os.pathsep + current
-            )
-            return [sys.executable, '-m', 'benchmark_core.cli'], environment
-        executable = shutil.which(benchmark_command)
-        if executable is None:
-            raise FileNotFoundError(
-                f'Benchmark command not found: {benchmark_command}; '
-                'install the benchmarks package or provide benchmark_root'
-            )
-        return [executable], environment
-
     def execute(self, manifest_file: str, dataset_file: str,
                 results_file: str, experiment_id: str,
                 warmup_runs: int = 1, measured_runs: int = 5,
@@ -126,17 +85,17 @@ class DBBenchQueryResource:
                 benchmark_root: str | None = None) -> bool:
         """Run and validate one standalone DBBench execution artifact."""
         try:
-            manifest_path = _input_file(
+            manifest_path = input_file(
                 self._shared_directory, manifest_file
             )
-            dataset_path = _input_file(
+            dataset_path = input_file(
                 self._shared_directory, dataset_file
             )
-            results_path = _resolve_shared_path(
+            results_path = resolve_shared_path(
                 self._shared_directory, results_file, 'Output'
             )
             manifest = _load_query_manifest(str(manifest_path))
-            command, environment = self._standalone_command(
+            command, environment = standalone_command(
                 benchmark_command, benchmark_root
             )
             command.extend([

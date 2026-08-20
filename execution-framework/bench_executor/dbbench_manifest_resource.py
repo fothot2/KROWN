@@ -10,33 +10,11 @@ import sys
 from typing import Iterable
 
 from bench_executor.logger import Logger
+from bench_executor.standalone_benchmark import (
+    input_directory, input_file, resolve_shared_path,
+    standalone_command,
+)
 from bench_executor.rdf_query_benchmark import _load_query_manifest
-
-
-def _resolve_shared_path(shared: str, declared: str, kind: str) -> Path:
-    if not isinstance(declared, str) or not declared:
-        raise ValueError(f'{kind} path must be a non-empty string')
-    if os.path.isabs(declared):
-        raise ValueError(f'{kind} path must be relative')
-    shared_path = Path(shared).resolve()
-    path = (shared_path / declared).resolve()
-    if os.path.commonpath((str(shared_path), str(path))) != str(shared_path):
-        raise ValueError(f'{kind} path leaves the shared directory: {declared}')
-    return path
-
-
-def _input_file(shared: str, declared: str) -> Path:
-    path = _resolve_shared_path(shared, declared, 'Input')
-    if not path.is_file():
-        raise FileNotFoundError(f'Input is not an existing file: {declared}')
-    return path
-
-
-def _input_directory(shared: str, declared: str) -> Path:
-    path = _resolve_shared_path(shared, declared, 'Input')
-    if not path.is_dir():
-        raise FileNotFoundError(f'Input is not an existing directory: {declared}')
-    return path
 
 
 class DBBenchManifestResource:
@@ -56,29 +34,6 @@ class DBBenchManifestResource:
     def root_mount_directory(self) -> str:
         return __name__.lower()
 
-    def _standalone_command(self, benchmark_command: str,
-                            benchmark_root: str | None) -> tuple[list[str], dict]:
-        environment = os.environ.copy()
-        if benchmark_root is not None:
-            root = Path(benchmark_root).resolve()
-            if not (root / 'benchmark_core/cli.py').is_file():
-                raise FileNotFoundError(
-                    f'benchmark_root does not contain benchmark_core: {root}'
-                )
-            current = environment.get('PYTHONPATH')
-            environment['PYTHONPATH'] = (
-                str(root) if not current
-                else str(root) + os.pathsep + current
-            )
-            return [sys.executable, '-m', 'benchmark_core.cli'], environment
-        executable = shutil.which(benchmark_command)
-        if executable is None:
-            raise FileNotFoundError(
-                f'Benchmark command not found: {benchmark_command}; '
-                'install the benchmarks package or provide benchmark_root'
-            )
-        return [executable], environment
-
     def execute(self, output_file: str, workload: str, dataset: str,
                 inventory_file: str | None = None,
                 query_root: str | None = None,
@@ -95,10 +50,10 @@ class DBBenchManifestResource:
                 )
             groups = tuple(groups)
             join_sizes = tuple(join_sizes)
-            output = _resolve_shared_path(
+            output = resolve_shared_path(
                 self._shared_directory, output_file, 'Output'
             )
-            command, environment = self._standalone_command(
+            command, environment = standalone_command(
                 benchmark_command, benchmark_root
             )
             command.extend([
@@ -107,15 +62,15 @@ class DBBenchManifestResource:
                 '--groups', *groups, '--join-sizes', *join_sizes,
             ])
             if inventory_file is not None:
-                command.extend(['--inventory', str(_input_file(
+                command.extend(['--inventory', str(input_file(
                     self._shared_directory, inventory_file
                 ))])
             else:
-                command.extend(['--query-root', str(_input_directory(
+                command.extend(['--query-root', str(input_directory(
                     self._shared_directory, query_root
                 ))])
             if query_id_file is not None:
-                command.extend(['--query-id-file', str(_input_file(
+                command.extend(['--query-id-file', str(input_file(
                     self._shared_directory, query_id_file
                 ))])
             completed = subprocess.run(
