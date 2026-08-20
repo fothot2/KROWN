@@ -12,7 +12,8 @@ import sys
 
 from bench_executor.logger import Logger
 from bench_executor.standalone_benchmark import (
-    input_file, resolve_shared_path, standalone_command,
+    commit_output, discard_output, input_file, resolve_shared_path,
+    standalone_command, temporary_output,
 )
 from bench_executor.rdf_query_benchmark import _load_query_manifest
 
@@ -84,6 +85,7 @@ class DBBenchQueryResource:
                 benchmark_command: str = 'vortex-rdf-bench',
                 benchmark_root: str | None = None) -> bool:
         """Run and validate one standalone DBBench execution artifact."""
+        temporary = None
         try:
             manifest_path = input_file(
                 self._shared_directory, manifest_file
@@ -95,6 +97,7 @@ class DBBenchQueryResource:
                 self._shared_directory, results_file, 'Output'
             )
             manifest = _load_query_manifest(str(manifest_path))
+            temporary = temporary_output(results_path, seed=resume)
             command, environment = standalone_command(
                 benchmark_command, benchmark_root
             )
@@ -102,7 +105,7 @@ class DBBenchQueryResource:
                 'dbbench', 'run',
                 '--manifest', str(manifest_path),
                 '--dataset-path', str(dataset_path),
-                '--output', str(results_path),
+                '--output', str(temporary),
                 '--experiment-id', experiment_id,
                 '--warmup-runs', str(warmup_runs),
                 '--measured-runs', str(measured_runs),
@@ -120,7 +123,7 @@ class DBBenchQueryResource:
                     f'Benchmark command failed with exit code '
                     f'{completed.returncode}: {message}'
                 )
-            records = _load_results(results_path)
+            records = _load_results(temporary)
             expected_count = len(manifest.queries) * (
                 warmup_runs + measured_runs
             )
@@ -157,6 +160,8 @@ class DBBenchQueryResource:
                 if key in keys:
                     raise ValueError(f'Duplicate result key: {key}')
                 keys.add(key)
+            commit_output(temporary, results_path)
+            temporary = None
             self._logger.info(
                 f'Wrote {len(records)} DBBench result records to '
                 f'"{results_path}"'
@@ -168,3 +173,5 @@ class DBBenchQueryResource:
                 f'{type(error).__name__}: {error}'
             )
             return False
+        finally:
+            discard_output(temporary)

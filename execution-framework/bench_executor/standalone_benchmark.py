@@ -66,3 +66,35 @@ def standalone_command(
             'install the benchmarks package or provide benchmark_root'
         )
     return [executable], environment
+
+
+
+def temporary_output(final: Path, seed: bool = False) -> Path:
+    """Create one private sibling path for validated output."""
+    import tempfile
+    final.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, name = tempfile.mkstemp(
+        prefix=f'.{final.name}.', suffix='.tmp', dir=final.parent
+    )
+    os.close(descriptor)
+    temporary = Path(name)
+    if seed and final.is_file():
+        shutil.copyfile(final, temporary)
+    else:
+        temporary.unlink()
+    return temporary
+
+
+def commit_output(temporary: Path, final: Path) -> None:
+    """Replace the declared artifact with a validated sibling."""
+    if not temporary.is_file():
+        raise FileNotFoundError(
+            f'Validated temporary output does not exist: {temporary}'
+        )
+    os.replace(temporary, final)
+
+
+def discard_output(temporary: Path | None) -> None:
+    """Remove an incomplete temporary artifact if it exists."""
+    if temporary is not None:
+        temporary.unlink(missing_ok=True)

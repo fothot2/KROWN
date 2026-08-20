@@ -12,7 +12,7 @@ from typing import Iterable
 from bench_executor.logger import Logger
 from bench_executor.standalone_benchmark import (
     input_directory, input_file, resolve_shared_path,
-    standalone_command,
+    commit_output, discard_output, standalone_command, temporary_output,
 )
 from bench_executor.rdf_query_benchmark import _load_query_manifest
 
@@ -43,6 +43,7 @@ class DBBenchManifestResource:
                 benchmark_command: str = 'vortex-rdf-bench',
                 benchmark_root: str | None = None) -> bool:
         """Generate and validate one manifest inside data/shared."""
+        temporary = None
         try:
             if (inventory_file is None) == (query_root is None):
                 raise ValueError(
@@ -53,11 +54,12 @@ class DBBenchManifestResource:
             output = resolve_shared_path(
                 self._shared_directory, output_file, 'Output'
             )
+            temporary = temporary_output(output)
             command, environment = standalone_command(
                 benchmark_command, benchmark_root
             )
             command.extend([
-                'dbbench', 'prepare', '--output', str(output),
+                'dbbench', 'prepare', '--output', str(temporary),
                 '--workload', workload, '--dataset', dataset,
                 '--groups', *groups, '--join-sizes', *join_sizes,
             ])
@@ -83,11 +85,13 @@ class DBBenchManifestResource:
                     f'Benchmark command failed with exit code '
                     f'{completed.returncode}: {message}'
                 )
-            with output.open('r', encoding='utf-8') as stream:
+            with temporary.open('r', encoding='utf-8') as stream:
                 manifest = json.load(stream)
-            loaded = _load_query_manifest(str(output))
+            loaded = _load_query_manifest(str(temporary))
             if len(loaded.queries) != len(manifest.get('queries', [])):
                 raise RuntimeError('generated manifest query count mismatch')
+            commit_output(temporary, output)
+            temporary = None
             self._logger.info(
                 f'Wrote {len(loaded.queries)} DBBench queries to "{output}"'
             )
@@ -98,3 +102,5 @@ class DBBenchManifestResource:
                 f'{type(error).__name__}: {error}'
             )
             return False
+        finally:
+            discard_output(temporary)
