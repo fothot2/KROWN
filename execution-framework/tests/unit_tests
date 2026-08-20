@@ -1528,6 +1528,60 @@ class UnitTests(unittest.TestCase):
             )['sha256']
             self.assertNotEqual(first, second)
 
+    def test_dbbench_resource_standalone_cli(self):
+        with tempfile.TemporaryDirectory() as directory:
+            shared = Path(directory) / 'data/shared'
+            shared.mkdir(parents=True)
+            (shared / 'inventory.json').write_text(
+                json.dumps([self._dbbench_source_record()]), encoding='utf-8'
+            )
+            resource = DBBenchManifestResource(
+                str(Path(directory) / 'data'), directory, directory, False
+            )
+            self.assertTrue(resource.execute(
+                output_file='standalone.json', workload='dbbench',
+                dataset='dbpedia', inventory_file='inventory.json',
+                implementation='standalone',
+                benchmark_root='/users/u0182905/benchmarks',
+            ))
+            self.assertTrue((shared / 'standalone.json').is_file())
+
+    def test_dbbench_resource_verify_matches_legacy(self):
+        with tempfile.TemporaryDirectory() as directory:
+            shared = Path(directory) / 'data/shared'
+            shared.mkdir(parents=True)
+            (shared / 'inventory.json').write_text(
+                json.dumps([self._dbbench_source_record()]), encoding='utf-8'
+            )
+            resource = DBBenchManifestResource(
+                str(Path(directory) / 'data'), directory, directory, False
+            )
+            self.assertTrue(resource.execute(
+                output_file='verify.json', workload='dbbench',
+                dataset='dbpedia', inventory_file='inventory.json',
+                implementation='verify',
+                benchmark_root='/users/u0182905/benchmarks',
+            ))
+            leftovers = list(shared.glob('.verify.json.legacy.*.json'))
+            self.assertEqual(leftovers, [])
+
+    def test_dbbench_resource_reports_missing_public_command(self):
+        with tempfile.TemporaryDirectory() as directory:
+            shared = Path(directory) / 'data/shared'
+            shared.mkdir(parents=True)
+            (shared / 'inventory.json').write_text(
+                json.dumps([self._dbbench_source_record()]), encoding='utf-8'
+            )
+            resource = DBBenchManifestResource(
+                str(Path(directory) / 'data'), directory, directory, False
+            )
+            self.assertFalse(resource.execute(
+                output_file='missing.json', workload='dbbench',
+                dataset='dbpedia', inventory_file='inventory.json',
+                implementation='standalone',
+                benchmark_command='definitely-missing-vortex-rdf-bench',
+            ))
+
 if __name__ == '__main__':
     # SELinux causes weird permission denied issues, warn users
     try:
