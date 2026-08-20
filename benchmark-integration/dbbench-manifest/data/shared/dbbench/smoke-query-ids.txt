@@ -1,0 +1,10 @@
+# Canonical DBBench smoke subset. One query from each canonical query family.
+TP/dbpedia/VVoSPARQL.txt::q0000
+TP/dbpedia/sVVSPARQL.txt::q0000
+TP/dbpedia/sVoSPARQL.txt::q0000
+TP/dbpedia/spVSPARQL.txt::q0000
+TP/dbpedia/spoSPARQL.txt::q0000
+TP/dbpedia/VpVSPARQL.txt::q0000
+TP/dbpedia/VpoSPARQL.txt::q0000
+TP/dbpedia/VpVSPARQL_small.txt::q0000
+TP/dbpedia/VpVSPARQL_big.txt::q0000

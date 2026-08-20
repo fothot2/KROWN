@@ -1,7 +1,7 @@
 {
   "@id": "https://w3id.org/krown/benchmark-integration/dbbench-manifest",
-  "description": "Prepare the canonical 3642-query DBBench manifest through the public standalone benchmark interface.",
-  "name": "Canonical DBBench manifest preparation",
+  "description": "Prepare the canonical 3642-query DBBench manifest and run a deterministic smoke subset against an externally staged DBpedia RDF dataset.",
+  "name": "Canonical DBBench manifest and smoke execution",
   "steps": [
     {
       "@id": "https://w3id.org/krown/benchmark-integration/dbbench-manifest/prepare",
@@ -15,6 +15,36 @@
         "workload": "dbbench-tp-joins"
       },
       "resource": "DBBenchManifestResource"
+    },
+    {
+      "@id": "https://w3id.org/krown/benchmark-integration/dbbench-manifest/prepare-smoke",
+      "command": "execute",
+      "name": "Generate canonical DBBench smoke manifest",
+      "parameters": {
+        "benchmark_command": "vortex-rdf-bench",
+        "dataset": "dbpedia",
+        "inventory_file": "dbbench/canonical-inventory.json",
+        "output_file": "manifests/dbbench-smoke.json",
+        "query_id_file": "dbbench/smoke-query-ids.txt",
+        "workload": "dbbench-tp-joins-smoke"
+      },
+      "resource": "DBBenchManifestResource"
+    },
+    {
+      "@id": "https://w3id.org/krown/benchmark-integration/dbbench-manifest/run-smoke",
+      "command": "execute",
+      "name": "Execute canonical DBBench smoke manifest",
+      "parameters": {
+        "benchmark_command": "vortex-rdf-bench",
+        "dataset_file": "dbbench/dbpedia.nt",
+        "experiment_id": "dbbench-canonical-smoke-rdflib",
+        "manifest_file": "manifests/dbbench-smoke.json",
+        "measured_runs": 1,
+        "results_file": "raw/dbbench-smoke.jsonl",
+        "timeout_s": 60.0,
+        "warmup_runs": 0
+      },
+      "resource": "DBBenchQueryResource"
     }
   ]
 }
