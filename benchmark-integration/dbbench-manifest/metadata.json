@@ -1,0 +1,21 @@
+{
+  "@id": "https://w3id.org/krown/benchmark-integration/dbbench-manifest",
+  "description": "Prepare the canonical 3642-query DBBench manifest through the public standalone benchmark interface.",
+  "name": "Canonical DBBench manifest preparation",
+  "steps": [
+    {
+      "@id": "https://w3id.org/krown/benchmark-integration/dbbench-manifest/prepare",
+      "command": "execute",
+      "name": "Generate canonical DBBench manifest",
+      "parameters": {
+        "benchmark_command": "vortex-rdf-bench",
+        "dataset": "dbpedia",
+        "implementation": "standalone",
+        "inventory_file": "dbbench/canonical-inventory.json",
+        "output_file": "manifests/dbbench.json",
+        "workload": "dbbench-tp-joins"
+      },
+      "resource": "DBBenchManifestResource"
+    }
+  ]
+}
