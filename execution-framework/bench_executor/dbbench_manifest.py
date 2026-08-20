@@ -190,6 +190,67 @@ def convert(*, output: Path, workload: str, dataset: str, inventory: Path | None
     return manifest
 
 
+
+
+def sha256_file(path: Path) -> str:
+    """Calculate the SHA-256 hash of one file."""
+    digest = hashlib.sha256()
+    with path.open('rb') as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b''):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def select_query_records(records: Iterable[dict[str, Any]],
+                         query_ids: Iterable[str] | None = None
+                         ) -> list[dict[str, Any]]:
+    """Select known query identifiers and keep deterministic order."""
+    records = list(records)
+    if query_ids is None:
+        return sorted(records, key=lambda record: record['query_id'])
+    selected = list(query_ids)
+    duplicates = sorted(
+        query_id for query_id, count in Counter(selected).items() if count > 1
+    )
+    if duplicates:
+        raise ValueError(
+            f'duplicate selected query_id values: {", ".join(duplicates)}'
+        )
+    by_id = {record['query_id']: record for record in records}
+    unknown = sorted(set(selected) - set(by_id))
+    if unknown:
+        raise ValueError(f'unknown selected query_id values: {", ".join(unknown)}')
+    if not selected:
+        raise ValueError('query selection must not be empty')
+    return sorted((by_id[query_id] for query_id in selected),
+                  key=lambda record: record['query_id'])
+
+
+def query_tree_provenance(root: Path, dataset: str,
+                          groups: Iterable[str],
+                          join_sizes: Iterable[str]) -> dict[str, Any]:
+    """Build deterministic provenance for selected DBBench query files."""
+    entries = []
+    digest = hashlib.sha256()
+    for path in iter_query_files(root, dataset, groups, join_sizes):
+        relative = path.relative_to(root).as_posix()
+        file_hash = sha256_file(path)
+        size = path.stat().st_size
+        entry = {'path': relative, 'size_bytes': size, 'sha256': file_hash}
+        entries.append(entry)
+        digest.update(json.dumps(entry, sort_keys=True,
+                                 separators=(',', ':')).encode('utf-8'))
+        digest.update(b'\n')
+    if not entries:
+        raise ValueError('DBBench query tree contains no selected files')
+    return {'sha256': digest.hexdigest(), 'files': entries}
+
+
+def read_query_ids(path: Path) -> list[str]:
+    """Read query identifiers from one text file."""
+    return [line.strip() for line in path.read_text(encoding='utf-8').splitlines()
+            if line.strip() and not line.lstrip().startswith('#')]
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     source = parser.add_mutually_exclusive_group(required=True)
