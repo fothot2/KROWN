@@ -8,6 +8,7 @@ import subprocess
 import tempfile
 import json
 import hashlib
+import logging
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -58,6 +59,31 @@ CASE_INFO_FILE_NAME = 'case-info.txt'
 
 
 class UnitTests(unittest.TestCase):
+    def test_logger_replacement_closes_old_handlers(self):
+        with tempfile.TemporaryDirectory() as first_directory, \
+                tempfile.TemporaryDirectory() as second_directory:
+            first = Logger('logger-replacement-test', first_directory, False)
+            first_handlers = list(first._logger.handlers)
+            second = Logger(
+                'logger-replacement-test', second_directory, False
+            )
+            file_handlers = [
+                handler for handler in first_handlers
+                if isinstance(handler, logging.FileHandler)
+            ]
+            self.assertEqual(len(file_handlers), 1)
+            self.assertIsNone(file_handlers[0].stream)
+            self.assertNotIn(file_handlers[0], second._logger.handlers)
+            self.assertTrue(second._logger.handlers)
+            second.close()
+
+    def test_logger_close_is_idempotent(self):
+        with tempfile.TemporaryDirectory() as directory:
+            logger = Logger('logger-close-test', directory, False)
+            logger.close()
+            logger.close()
+            self.assertEqual(logger._logger.handlers, [])
+
     def test_container_readiness_times_out_without_logs(self):
         container = Container.__new__(Container)
         container._container_id = 'container-id'

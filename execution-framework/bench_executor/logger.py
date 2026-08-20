@@ -42,10 +42,8 @@ class Logger:
             level = logging.DEBUG
         self._logger.setLevel(level)
 
-        # Disable default handlers
-        handlers = self._logger.handlers
-        for h in handlers:
-            self._logger.removeHandler(h)
+        # Close and remove handlers from an earlier instance.
+        self._close_handlers()
 
         # Configure handlers
         directory = os.path.abspath(directory)
@@ -65,15 +63,28 @@ class Logger:
             log_console.setFormatter(format_console)
             self._logger.addHandler(log_console)
 
-    def __del__(self):
-        """Close any handlers if needed"""
-        handlers = self._logger.handlers
-        for h in handlers:
+    def _close_handlers(self):
+        """Close and remove all handlers from this named logger."""
+        logger = getattr(self, '_logger', None)
+        if logger is None:
+            return
+        for handler in list(logger.handlers):
+            logger.removeHandler(handler)
             try:
-                h.close()
-            except AttributeError:
+                handler.close()
+            except (AttributeError, OSError):
                 pass
-            self._logger.removeHandler(h)
+
+    def close(self):
+        """Close this logger. Repeated calls are safe."""
+        self._close_handlers()
+
+    def __del__(self):
+        """Close handlers when explicit cleanup did not run."""
+        try:
+            self.close()
+        except Exception:
+            pass
 
     @property
     def verbose(self) -> bool:
