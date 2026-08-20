@@ -1576,6 +1576,82 @@ class UnitTests(unittest.TestCase):
             ))
             resource._logger.close()
 
+
+    def test_dbbench_query_resource_preserves_output_after_failures(self):
+        cases = (
+            ('command_failure', 'partial', 7),
+            ('invalid_jsonl', 'not-json\n', 0),
+            ('invalid_schema', {'status': 'invalid'}, 0),
+            ('wrong_provenance', {'manifest_sha256': 'wrong'}, 0),
+            ('duplicate_key', 'duplicate', 0),
+        )
+        for name, mutation, returncode in cases:
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                shared = root / 'data/shared'
+                shared.mkdir(parents=True)
+                dataset = shared / 'data.ttl'
+                dataset.write_text('@prefix ex: <http://example/> .\n', encoding='utf-8')
+                manifest = shared / 'manifest.json'
+                manifest.write_text(json.dumps({
+                    'schema_version': 1, 'workload': 'tiny', 'dataset': 'tiny',
+                    'query_count': 1, 'queries': [{
+                        'query_id': 'q1', 'query': 'SELECT * WHERE { ?s ?p ?o }',
+                        'query_result_type': 'SELECT',
+                        'comparison_mode': 'unordered_fingerprint',
+                    }],
+                }), encoding='utf-8')
+                final = shared / 'raw/results.jsonl'
+                final.parent.mkdir()
+                old = b'old validated artifact\n'
+                final.write_bytes(old)
+                measured_runs = 2 if mutation == 'duplicate' else 1
+
+                def fake_run(command, **kwargs):
+                    output = Path(command[command.index('--output') + 1])
+                    if mutation == 'partial':
+                        output.write_text('partial', encoding='utf-8')
+                    else:
+                        record = {
+                            'schema_version': 1, 'experiment_id': 'atomic-test',
+                            'system': 'rdflib', 'dataset': 'tiny', 'workload': 'tiny',
+                            'query_id': 'q1', 'phase': 'measured', 'run': 0,
+                            'order': 0, 'status': 'ok', 'elapsed_ns': 1,
+                            'result_count': 0,
+                            'manifest_sha256': hashlib.sha256(manifest.read_bytes()).hexdigest(),
+                            'dataset_sha256': hashlib.sha256(dataset.read_bytes()).hexdigest(),
+                        }
+                        if isinstance(mutation, dict):
+                            record.update(mutation)
+                        if mutation == 'not-json\n':
+                            output.write_text(mutation, encoding='utf-8')
+                        else:
+                            records = [record, dict(record)] if mutation == 'duplicate' else [record]
+                            output.write_text(
+                                ''.join(json.dumps(item) + '\n' for item in records),
+                                encoding='utf-8',
+                            )
+                    return SimpleNamespace(returncode=returncode, stdout='', stderr='failed')
+
+                resource = DBBenchQueryResource(
+                    str(root / 'data'), directory, directory, False
+                )
+                with patch(
+                        'bench_executor.dbbench_query_resource.standalone_command',
+                        return_value=(['fake-benchmark'], {})), patch(
+                        'bench_executor.dbbench_query_resource.subprocess.run',
+                        side_effect=fake_run):
+                    success = resource.execute(
+                        manifest_file='manifest.json', dataset_file='data.ttl',
+                        results_file='raw/results.jsonl', experiment_id='atomic-test',
+                        warmup_runs=0, measured_runs=measured_runs,
+                    )
+                resource._logger.close()
+                self.assertFalse(success)
+                self.assertEqual(final.read_bytes(), old)
+                self.assertEqual(list(final.parent.glob('.results.jsonl.*.tmp')), [])
+
+
 if __name__ == '__main__':
     # SELinux causes weird permission denied issues, warn users
     try:
