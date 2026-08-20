@@ -1654,14 +1654,15 @@ class UnitTests(unittest.TestCase):
 
 
 
-    def test_external_rdf_dataset_resource_links_and_cleans(self):
+    def test_external_rdf_dataset_resource_hardlinks_and_cleans(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory); source = root / 'source.nt'; source.write_text('<a> <b> <c> .\n')
             resource = ExternalRdfDatasetResource(str(root / 'data'), directory, directory, False)
             with patch.dict(os.environ, {'TEST_RDF_DATASET': str(source)}):
                 self.assertTrue(resource.execute('TEST_RDF_DATASET', 'dbbench/data.nt'))
             staged = root / 'data/shared/dbbench/data.nt'
-            self.assertTrue(staged.is_symlink()); self.assertEqual(staged.resolve(), source)
+            self.assertFalse(staged.is_symlink())
+            self.assertEqual(staged.stat().st_ino, source.stat().st_ino)
             self.assertTrue(resource.stop()); self.assertFalse(staged.exists())
 
     def test_external_rdf_dataset_resource_rejects_hash_mismatch(self):

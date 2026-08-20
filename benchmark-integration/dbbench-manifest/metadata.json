@@ -36,7 +36,7 @@
       "name": "Stage external DBpedia RDF dataset",
       "parameters": {
         "destination_file": "dbbench/dbpedia.nt",
-        "mode": "link",
+        "mode": "hardlink",
         "source_env": "KROWN_DBBENCH_DATASET"
       },
       "resource": "ExternalRdfDatasetResource"

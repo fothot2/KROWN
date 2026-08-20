@@ -22,9 +22,9 @@ class ExternalRdfDatasetResource:
     def root_mount_directory(self) -> str: return __name__.lower()
 
     def execute(self, source_env: str, destination_file: str,
-                mode: str = 'link', expected_sha256: str | None = None) -> bool:
+                mode: str = 'hardlink', expected_sha256: str | None = None) -> bool:
         try:
-            if mode not in {'link', 'copy'}:
+            if mode not in {'hardlink', 'copy'}:
                 raise ValueError(f'Unsupported staging mode: {mode}')
             source_value = os.environ.get(source_env)
             if not source_value:
@@ -46,8 +46,10 @@ class ExternalRdfDatasetResource:
                 if digest.hexdigest() != expected_sha256.lower():
                     raise ValueError('External RDF dataset SHA-256 mismatch')
             destination.parent.mkdir(parents=True, exist_ok=True)
-            if mode == 'link': destination.symlink_to(source)
-            else: shutil.copyfile(source, destination)
+            if mode == 'hardlink':
+                os.link(source, destination)
+            else:
+                shutil.copyfile(source, destination)
             marker.write_text(f'{mode}\n{source}\n', encoding='utf-8')
             self._destination, self._marker = destination, marker
             self._logger.info(f'Staged external RDF dataset at "{destination}"')
