@@ -31,6 +31,17 @@
       "resource": "DBBenchManifestResource"
     },
     {
+      "@id": "https://w3id.org/krown/benchmark-integration/dbbench-manifest/stage-dataset",
+      "command": "execute",
+      "name": "Stage external DBpedia RDF dataset",
+      "parameters": {
+        "destination_file": "dbbench/dbpedia.nt",
+        "mode": "link",
+        "source_env": "KROWN_DBBENCH_DATASET"
+      },
+      "resource": "ExternalRdfDatasetResource"
+    },
+    {
       "@id": "https://w3id.org/krown/benchmark-integration/dbbench-manifest/run-smoke",
       "command": "execute",
       "name": "Execute canonical DBBench smoke manifest",
