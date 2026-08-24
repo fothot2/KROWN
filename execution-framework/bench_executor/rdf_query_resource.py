@@ -107,7 +107,7 @@ class RdfQueryResource:
             )
             manifest = load_rdf_workload_manifest(manifest_path)
             _require_full_workload_opt_in(
-                len(manifest.queries), max_query_count, allow_full_env
+                len(manifest.queries), max_query_count, large_workload_env
             )
             temporary = temporary_output(results_path, seed=resume)
             command, environment = standalone_command(

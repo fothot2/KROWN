@@ -1,0 +1,51 @@
+{
+  "@id": "https://w3id.org/krown/benchmark-integration/bsbm-smoke",
+  "name": "BSBM generic adapter smoke execution",
+  "description": "Prepare BSBM through its adapter and execute it through generic RDF resources.",
+  "steps": [
+    {
+      "@id": "https://w3id.org/krown/benchmark-integration/bsbm-smoke/prepare",
+      "name": "Prepare BSBM manifest",
+      "resource": "RdfManifestResource",
+      "command": "execute",
+      "parameters": {
+        "benchmark": "bsbm",
+        "query_root_env": "KROWN_BSBM_QUERY_ROOT",
+        "output_file": "manifests/bsbm.json",
+        "workload": "bsbm-explore-smoke",
+        "dataset": "bsbm-local",
+        "benchmark_root": "/users/u0182905/benchmarks"
+      }
+    },
+    {
+      "@id": "https://w3id.org/krown/benchmark-integration/bsbm-smoke/stage",
+      "name": "Stage BSBM dataset",
+      "resource": "ExternalRdfDatasetResource",
+      "command": "execute",
+      "parameters": {
+        "source_file_env": "KROWN_RDF_DATASET_FILE",
+        "destination_file": "bsbm/dataset.ttl",
+        "mode": "hardlink"
+      }
+    },
+    {
+      "@id": "https://w3id.org/krown/benchmark-integration/bsbm-smoke/run",
+      "name": "Execute BSBM through generic RDF resource",
+      "resource": "RdfQueryResource",
+      "command": "execute",
+      "parameters": {
+        "benchmark": "bsbm",
+        "benchmark_root": "/users/u0182905/benchmarks",
+        "manifest_file": "manifests/bsbm.json",
+        "dataset_file": "bsbm/dataset.ttl",
+        "results_file": "raw/bsbm.jsonl",
+        "experiment_id": "bsbm-generic-smoke-rdflib",
+        "system": "rdflib",
+        "warmup_runs": 0,
+        "measured_runs": 1,
+        "timeout_s": 60.0,
+        "large_workload_env": "KROWN_RDF_ALLOW_LARGE_WORKLOAD"
+      }
+    }
+  ]
+}

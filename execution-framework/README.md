@@ -423,3 +423,7 @@ RDF benchmark scenarios use benchmark-neutral environment variables:
 - `KROWN_RDF_ALLOW_LARGE_WORKLOAD=1` permits a workload above the configured query limit.
 
 A benchmark scenario can override these parameter values explicitly. Benchmark adapters do not require benchmark-specific execution resources.
+
+### BSBM adapter scenario
+
+The BSBM adapter is stored in the separate benchmarks repository. Put instantiated query files under `BSBM/data/queries/` and the RDF dataset under `BSBM/data/`. These paths are ignored by Git. Set `KROWN_BSBM_QUERY_ROOT` and `KROWN_RDF_DATASET_FILE` before running `benchmark-integration/bsbm-smoke`.
