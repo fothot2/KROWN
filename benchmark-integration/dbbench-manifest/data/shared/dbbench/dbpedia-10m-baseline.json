@@ -1,0 +1,65 @@
+{
+  "dataset": {
+    "format": "nt",
+    "logical_name": "dbpedia-10m",
+    "sha256": "82684ef2080b2004a25066bed38292cf40d7da64dcd8130c5057ff15d9c5317a",
+    "size_bytes": 1642607409
+  },
+  "manifest": {
+    "dataset": "dbpedia",
+    "query_count": 6,
+    "sha256": "f5f492680e6c1e276748a67f82d68ae9cbe0d48eaeaa3e46aa73ac86beca2c59",
+    "workload": "dbbench-tp-joins-smoke"
+  },
+  "records": [
+    {
+      "phase": "measured",
+      "query_id": "TP/dbpedia/VVoSPARQL.txt::q0208",
+      "result_count": 1,
+      "result_fingerprint": "b3d3c8d412a68bf544dc203b43c031c040490a03258284adb1617bc934f07cac",
+      "run": 0,
+      "status": "ok"
+    },
+    {
+      "phase": "measured",
+      "query_id": "TP/dbpedia/VpVSPARQL.txt::q0000",
+      "result_count": 0,
+      "result_fingerprint": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "run": 0,
+      "status": "ok"
+    },
+    {
+      "phase": "measured",
+      "query_id": "TP/dbpedia/VpoSPARQL.txt::q0000",
+      "result_count": 0,
+      "result_fingerprint": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "run": 0,
+      "status": "ok"
+    },
+    {
+      "phase": "measured",
+      "query_id": "TP/dbpedia/sVVSPARQL.txt::q0000",
+      "result_count": 7,
+      "result_fingerprint": "a4a0eed9912af47d80613be927b622c834008e1ceb97b987eb4aee53d1fd0bf4",
+      "run": 0,
+      "status": "ok"
+    },
+    {
+      "phase": "measured",
+      "query_id": "TP/dbpedia/spVSPARQL.txt::q0229",
+      "result_count": 1,
+      "result_fingerprint": "a807a759f63ddebd2521324c3425dc8f25b9d39c4f99482ea7868ae49208f879",
+      "run": 0,
+      "status": "ok"
+    },
+    {
+      "phase": "measured",
+      "query_id": "TP/dbpedia/spoSPARQL.txt::q0000",
+      "result_count": 0,
+      "result_fingerprint": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "run": 0,
+      "status": "ok"
+    }
+  ],
+  "schema": "dbbench-smoke-baseline-v1"
+}

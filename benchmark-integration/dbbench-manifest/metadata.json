@@ -56,6 +56,18 @@
         "warmup_runs": 0
       },
       "resource": "DBBenchQueryResource"
+    },
+    {
+      "@id": "https://w3id.org/krown/benchmark-integration/dbbench-manifest/validate-smoke",
+      "command": "execute",
+      "name": "Validate DBpedia 10M semantic smoke baseline",
+      "parameters": {
+        "baseline_file": "dbbench/dbpedia-10m-baseline.json",
+        "dataset_file": "dbbench/dbpedia.nt",
+        "manifest_file": "manifests/dbbench-smoke.json",
+        "results_input_file": "raw/dbbench-smoke.jsonl"
+      },
+      "resource": "DBBenchBaselineResource"
     }
   ]
 }
