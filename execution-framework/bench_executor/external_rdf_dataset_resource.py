@@ -21,14 +21,14 @@ class ExternalRdfDatasetResource:
     @property
     def root_mount_directory(self) -> str: return __name__.lower()
 
-    def execute(self, source_env: str, destination_file: str,
+    def execute(self, source_file_env: str, destination_file: str,
                 mode: str = 'hardlink', expected_sha256: str | None = None) -> bool:
         try:
             if mode not in {'hardlink', 'copy'}:
                 raise ValueError(f'Unsupported staging mode: {mode}')
-            source_value = os.environ.get(source_env)
+            source_value = os.environ.get(source_file_env)
             if not source_value:
-                raise ValueError(f'Environment variable is not set: {source_env}')
+                raise ValueError(f'Environment variable is not set: {source_file_env}')
             source = Path(source_value).expanduser().resolve()
             if not source.is_file():
                 raise FileNotFoundError(f'External RDF dataset is not a file: {source}')

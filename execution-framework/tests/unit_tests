@@ -1726,6 +1726,47 @@ class UnitTests(unittest.TestCase):
 
 
 
+    def test_rdf_query_resource_uses_neutral_large_workload_variable(self):
+        with self.assertRaisesRegex(ValueError, 'KROWN_RDF_ALLOW_LARGE_WORKLOAD=1'):
+            with patch.dict(os.environ, {}, clear=True):
+                _require_full_workload_opt_in(
+                    101, 100, 'KROWN_RDF_ALLOW_LARGE_WORKLOAD'
+                )
+
+    def test_dbbench_metadata_uses_neutral_rdf_configuration(self):
+        path = Path(__file__).resolve().parents[2] / (
+            'benchmark-integration/dbbench-manifest/metadata.json'
+        )
+        metadata = json.loads(path.read_text(encoding='utf-8'))
+        stage = next(step for step in metadata['steps']
+                     if step['@id'].endswith('/stage-dataset'))
+        execute = next(step for step in metadata['steps']
+                       if step['@id'].endswith('/run-smoke'))
+        self.assertEqual(
+            stage['parameters']['source_file_env'],
+            'KROWN_RDF_DATASET_FILE',
+        )
+        self.assertNotIn('source_env', stage['parameters'])
+        self.assertEqual(
+            execute['parameters']['large_workload_env'],
+            'KROWN_RDF_ALLOW_LARGE_WORKLOAD',
+        )
+
+    def test_external_dataset_resource_uses_neutral_source_file_parameter(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); source = root / 'source.nt'
+            source.write_text('<a> <b> <c> .\n', encoding='utf-8')
+            resource = ExternalRdfDatasetResource(
+                str(root / 'data'), directory, directory, False
+            )
+            with patch.dict(os.environ, {'KROWN_RDF_DATASET_FILE': str(source)}):
+                self.assertTrue(resource.execute(
+                    source_file_env='KROWN_RDF_DATASET_FILE',
+                    destination_file='benchmark/data.nt',
+                ))
+            self.assertTrue(resource.stop())
+            resource._logger.close()
+
     def test_dbbench_full_workload_guard_requires_explicit_opt_in(self):
         with patch.dict(os.environ, {}, clear=True):
             _require_full_workload_opt_in(100, 100, 'TEST_ALLOW_FULL')

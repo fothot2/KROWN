@@ -414,3 +414,12 @@ See main [README](../README.md).
 
 Licensed under the [MIT license](./LICENSE)<br>
 Written by Dylan Van Assche (dylan.vanassche@ugent.be)
+
+### Generic RDF experiment configuration
+
+RDF benchmark scenarios use benchmark-neutral environment variables:
+
+- `KROWN_RDF_DATASET_FILE` selects the external RDF dataset file.
+- `KROWN_RDF_ALLOW_LARGE_WORKLOAD=1` permits a workload above the configured query limit.
+
+A benchmark scenario can override these parameter values explicitly. Benchmark adapters do not require benchmark-specific execution resources.

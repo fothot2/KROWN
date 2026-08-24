@@ -52,16 +52,16 @@ def _load_results(path: Path) -> list[dict]:
 
 
 def _require_full_workload_opt_in(
-        query_count: int, max_query_count: int, allow_full_env: str) -> None:
+        query_count: int, max_query_count: int, large_workload_env: str) -> None:
     """Reject large manifests unless one named environment variable is set."""
     if max_query_count < 1:
         raise ValueError('max_query_count must be at least 1')
     if query_count <= max_query_count:
         return
-    if os.environ.get(allow_full_env) != '1':
+    if os.environ.get(large_workload_env) != '1':
         raise ValueError(
             f'RDF workload contains {query_count} queries, above the safe limit '
-            f'{max_query_count}; set {allow_full_env}=1 to allow full execution'
+            f'{max_query_count}; set {large_workload_env}=1 to allow full execution'
         )
 
 
@@ -91,7 +91,7 @@ class RdfQueryResource:
                 benchmark_command: str = 'vortex-rdf-bench',
                 benchmark_root: str | None = None,
                 max_query_count: int = 100,
-                allow_full_env: str = 'KROWN_RDF_ALLOW_LARGE_WORKLOAD',
+                large_workload_env: str = 'KROWN_RDF_ALLOW_LARGE_WORKLOAD',
                 benchmark: str = 'rdf', system: str = 'rdflib') -> bool:
         """Run and validate one standalone RDF query artifact."""
         temporary = None

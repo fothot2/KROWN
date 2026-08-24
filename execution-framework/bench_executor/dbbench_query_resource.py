@@ -30,7 +30,7 @@ class DBBenchQueryResource(RdfQueryResource):
             benchmark_command=benchmark_command,
             benchmark_root=benchmark_root,
             max_query_count=max_query_count,
-            allow_full_env=allow_full_env,
+            large_workload_env=allow_full_env,
             benchmark='dbbench',
             system='rdflib',
         )

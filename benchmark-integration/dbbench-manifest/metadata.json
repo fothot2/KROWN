@@ -37,7 +37,7 @@
       "parameters": {
         "destination_file": "dbbench/dbpedia.nt",
         "mode": "hardlink",
-        "source_env": "KROWN_DBBENCH_DATASET"
+        "source_file_env": "KROWN_RDF_DATASET_FILE"
       },
       "resource": "ExternalRdfDatasetResource"
     },
@@ -50,6 +50,7 @@
         "benchmark_command": "vortex-rdf-bench",
         "dataset_file": "dbbench/dbpedia.nt",
         "experiment_id": "dbbench-canonical-smoke-rdflib",
+        "large_workload_env": "KROWN_RDF_ALLOW_LARGE_WORKLOAD",
         "manifest_file": "manifests/dbbench-smoke.json",
         "measured_runs": 1,
         "results_file": "raw/dbbench-smoke.jsonl",
