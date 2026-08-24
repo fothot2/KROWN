@@ -1516,6 +1516,8 @@ class UnitTests(unittest.TestCase):
         self.assertEqual([step['resource'] for step in metadata['steps']], [
             'RdfManifestResource', 'ExternalRdfDatasetResource', 'RdfQueryResource'])
         self.assertEqual(metadata['steps'][2]['parameters']['benchmark'], 'bsbm')
+        self.assertEqual(metadata['steps'][0]['parameters']['input_env'], 'KROWN_BSBM_QUERY_STREAM')
+        self.assertEqual(metadata['steps'][0]['parameters']['adapter_options'], {'--selection': 'smoke'})
 
     def test_rdf_manifest_resource_calls_adapter_and_validates_output(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -1531,7 +1533,7 @@ class UnitTests(unittest.TestCase):
             with patch.dict(os.environ, {'TEST_BSBM_QUERIES': str(queries)}), patch(
                     'bench_executor.rdf_manifest_resource.standalone_command', return_value=(['bench'], {})), patch(
                     'bench_executor.rdf_manifest_resource.subprocess.run', side_effect=fake_run):
-                self.assertTrue(resource.execute('bsbm', 'TEST_BSBM_QUERIES',
+                self.assertTrue(resource.execute('bsbm', 'TEST_BSBM_QUERIES', '--query-root',
                     'manifests/bsbm.json', 'w', 'd'))
             resource._logger.close()
 

@@ -15,22 +15,42 @@ class RdfManifestResource:
     def name(self): return __name__
     @property
     def root_mount_directory(self): return __name__.lower()
-    def execute(self, benchmark: str, query_root_env: str, output_file: str,
-                workload: str, dataset: str,
+    def execute(self, benchmark: str, input_env: str, input_option: str,
+                output_file: str, workload: str, dataset: str,
+                environment_options: dict[str, str] | None = None,
+                adapter_options: dict[str, str] | None = None,
                 benchmark_command: str = 'vortex-rdf-bench',
                 benchmark_root: str | None = None) -> bool:
         temporary = None
         try:
-            source = os.environ.get(query_root_env)
-            if not source: raise ValueError(f'Environment variable is not set: {query_root_env}')
-            query_root = Path(source).expanduser().resolve()
-            if not query_root.is_dir(): raise FileNotFoundError(f'Query root is not a directory: {query_root}')
+            if not input_option.startswith('--'):
+                raise ValueError('input_option must be a long CLI option')
+            source_value = os.environ.get(input_env)
+            if not source_value:
+                raise ValueError(f'Environment variable is not set: {input_env}')
+            source = Path(source_value).expanduser().resolve()
+            if not source.exists():
+                raise FileNotFoundError(f'Adapter input does not exist: {source}')
             output = resolve_shared_path(self._shared, output_file, 'Output')
             temporary = temporary_output(output)
             command, environment = standalone_command(benchmark_command, benchmark_root)
-            command.extend([benchmark, 'prepare', '--query-root', str(query_root),
+            command.extend([benchmark, 'prepare', input_option, str(source),
                             '--output', str(temporary), '--workload', workload,
                             '--dataset', dataset])
+            for option, variable in (environment_options or {}).items():
+                if not option.startswith('--'):
+                    raise ValueError('environment option must be a long CLI option')
+                value = os.environ.get(variable)
+                if not value:
+                    raise ValueError(f'Environment variable is not set: {variable}')
+                resolved = Path(value).expanduser().resolve()
+                if not resolved.exists():
+                    raise FileNotFoundError(f'Adapter option input does not exist: {resolved}')
+                command.extend([option, str(resolved)])
+            for option, value in (adapter_options or {}).items():
+                if not option.startswith('--') or not isinstance(value, str) or not value:
+                    raise ValueError('adapter_options must map long CLI options to non-empty strings')
+                command.extend([option, value])
             completed = subprocess.run(command, cwd=benchmark_root, env=environment,
                                        capture_output=True, text=True, check=False)
             if completed.returncode != 0:

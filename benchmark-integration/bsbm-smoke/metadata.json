@@ -10,11 +10,19 @@
       "command": "execute",
       "parameters": {
         "benchmark": "bsbm",
-        "query_root_env": "KROWN_BSBM_QUERY_ROOT",
         "output_file": "manifests/bsbm.json",
         "workload": "bsbm-explore-smoke",
         "dataset": "bsbm-local",
-        "benchmark_root": "/users/u0182905/benchmarks"
+        "benchmark_root": "/users/u0182905/benchmarks",
+        "input_env": "KROWN_BSBM_QUERY_STREAM",
+        "input_option": "--query-stream",
+        "environment_options": {
+          "--generation-receipt": "KROWN_BSBM_GENERATION_RECEIPT",
+          "--dataset-path": "KROWN_RDF_DATASET_FILE"
+        },
+        "adapter_options": {
+          "--selection": "smoke"
+        }
       }
     },
     {
@@ -24,7 +32,7 @@
       "command": "execute",
       "parameters": {
         "source_file_env": "KROWN_RDF_DATASET_FILE",
-        "destination_file": "bsbm/dataset.ttl",
+        "destination_file": "bsbm/dataset.nt",
         "mode": "hardlink"
       }
     },

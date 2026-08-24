@@ -426,4 +426,4 @@ A benchmark scenario can override these parameter values explicitly. Benchmark a
 
 ### BSBM adapter scenario
 
-The BSBM adapter is stored in the separate benchmarks repository. Put instantiated query files under `BSBM/data/queries/` and the RDF dataset under `BSBM/data/`. These paths are ignored by Git. Set `KROWN_BSBM_QUERY_ROOT` and `KROWN_RDF_DATASET_FILE` before running `benchmark-integration/bsbm-smoke`.
+Generate BSBM outside KROWN. Store the ignored dataset, official Explore CSV stream, generation receipt, and test-driver data under the separate benchmarks repository. Set `KROWN_BSBM_QUERY_STREAM`, `KROWN_BSBM_GENERATION_RECEIPT`, and `KROWN_RDF_DATASET_FILE`. The smoke scenario imports the first measured instance of each BSBM query template. KROWN does not download, configure, or run the BSBM generator.
