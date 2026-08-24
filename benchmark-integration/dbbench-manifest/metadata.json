@@ -46,16 +46,18 @@
       "command": "execute",
       "name": "Execute canonical DBBench smoke manifest",
       "parameters": {
+        "benchmark": "dbbench",
         "benchmark_command": "vortex-rdf-bench",
         "dataset_file": "dbbench/dbpedia.nt",
         "experiment_id": "dbbench-canonical-smoke-rdflib",
         "manifest_file": "manifests/dbbench-smoke.json",
         "measured_runs": 1,
         "results_file": "raw/dbbench-smoke.jsonl",
+        "system": "rdflib",
         "timeout_s": 60.0,
         "warmup_runs": 0
       },
-      "resource": "DBBenchQueryResource"
+      "resource": "RdfQueryResource"
     },
     {
       "@id": "https://w3id.org/krown/benchmark-integration/dbbench-manifest/validate-smoke",

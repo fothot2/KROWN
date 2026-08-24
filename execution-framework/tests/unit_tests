@@ -48,7 +48,9 @@ from bench_executor.rdflib_query_benchmark import _resolve_input_path, \
         _resolve_output_path, _RdfLibAdapter, _WorkerRdfLibAdapter, \
         RdfLibQueryBenchmark  # noqa: E402
 from bench_executor.dbbench_manifest_resource import DBBenchManifestResource  # noqa: E402
-from bench_executor.dbbench_query_resource import DBBenchQueryResource, _require_full_workload_opt_in  # noqa: E402
+from bench_executor.dbbench_query_resource import DBBenchQueryResource  # noqa: E402
+from bench_executor.rdf_query_resource import (  # noqa: E402
+        RdfQueryResource, _require_full_workload_opt_in)
 from bench_executor.dbbench_baseline_resource import semantic_signature  # noqa: E402
 from bench_executor.external_rdf_dataset_resource import ExternalRdfDatasetResource  # noqa: E402
 
@@ -1504,6 +1506,49 @@ class UnitTests(unittest.TestCase):
                 benchmark_command='definitely-missing-vortex-rdf-bench',
             ))
 
+    def test_rdf_query_resource_builds_benchmark_neutral_command(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); shared = root / 'data/shared'
+            shared.mkdir(parents=True)
+            dataset = shared / 'data.ttl'; dataset.write_text('<a> <b> <c> .\n')
+            manifest = shared / 'manifest.json'
+            manifest.write_text(json.dumps({
+                'schema_version': 1, 'workload': 'adapter-smoke',
+                'dataset': 'tiny', 'query_count': 1,
+                'queries': [{'query_id': 'q1', 'query': 'ASK { ?s ?p ?o }'}],
+            }), encoding='utf-8')
+            seen = {}
+
+            def fake_run(command, **kwargs):
+                seen['command'] = command
+                output = Path(command[command.index('--output') + 1])
+                record = {
+                    'schema_version': 1, 'experiment_id': 'generic-run',
+                    'system': 'test-system', 'dataset': 'tiny',
+                    'workload': 'adapter-smoke', 'query_id': 'q1',
+                    'phase': 'measured', 'run': 0, 'order': 0,
+                    'status': 'ok', 'elapsed_ns': 1, 'result_count': 1,
+                    'manifest_sha256': hashlib.sha256(manifest.read_bytes()).hexdigest(),
+                    'dataset_sha256': hashlib.sha256(dataset.read_bytes()).hexdigest(),
+                }
+                output.write_text(json.dumps(record) + '\n', encoding='utf-8')
+                return SimpleNamespace(returncode=0, stdout='', stderr='')
+
+            resource = RdfQueryResource(str(root / 'data'), directory, directory, False)
+            with patch('bench_executor.rdf_query_resource.standalone_command',
+                       return_value=(['benchmark'], {})), patch(
+                       'bench_executor.rdf_query_resource.subprocess.run', side_effect=fake_run):
+                self.assertTrue(resource.execute(
+                    manifest_file='manifest.json', dataset_file='data.ttl',
+                    results_file='results.jsonl', experiment_id='generic-run',
+                    warmup_runs=0, measured_runs=1, benchmark='example-adapter',
+                    system='test-system'))
+            resource._logger.close()
+            self.assertEqual(seen['command'][1:3], ['example-adapter', 'run'])
+
+    def test_dbbench_query_resource_is_compatibility_wrapper(self):
+        self.assertTrue(issubclass(DBBenchQueryResource, RdfQueryResource))
+
     def test_dbbench_query_resource_runs_public_cli(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -1641,9 +1686,9 @@ class UnitTests(unittest.TestCase):
                     str(root / 'data'), directory, directory, False
                 )
                 with patch(
-                        'bench_executor.dbbench_query_resource.standalone_command',
+                        'bench_executor.rdf_query_resource.standalone_command',
                         return_value=(['fake-benchmark'], {})), patch(
-                        'bench_executor.dbbench_query_resource.subprocess.run',
+                        'bench_executor.rdf_query_resource.subprocess.run',
                         side_effect=fake_run):
                     success = resource.execute(
                         manifest_file='manifest.json', dataset_file='data.ttl',
