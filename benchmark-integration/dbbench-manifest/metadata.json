@@ -69,7 +69,7 @@
         "manifest_file": "manifests/dbbench-smoke.json",
         "results_input_file": "raw/dbbench-smoke.jsonl"
       },
-      "resource": "DBBenchBaselineResource"
+      "resource": "RdfBaselineResource"
     }
   ]
 }

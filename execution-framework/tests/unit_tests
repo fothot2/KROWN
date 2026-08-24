@@ -51,7 +51,10 @@ from bench_executor.dbbench_manifest_resource import DBBenchManifestResource  # 
 from bench_executor.dbbench_query_resource import DBBenchQueryResource  # noqa: E402
 from bench_executor.rdf_query_resource import (  # noqa: E402
         RdfQueryResource, _require_full_workload_opt_in)
-from bench_executor.dbbench_baseline_resource import semantic_signature  # noqa: E402
+from bench_executor.dbbench_baseline_resource import (  # noqa: E402
+        DBBenchBaselineResource, semantic_signature)
+from bench_executor.rdf_baseline_resource import (  # noqa: E402
+        RdfBaselineResource, validate_coverage)
 from bench_executor.external_rdf_dataset_resource import ExternalRdfDatasetResource  # noqa: E402
 
 LOG_DIR = os.path.join(os.path.dirname(__file__), '..', 'bench_executor',
@@ -1732,6 +1735,40 @@ class UnitTests(unittest.TestCase):
             _require_full_workload_opt_in(3642, 100, 'TEST_ALLOW_FULL')
         with self.assertRaisesRegex(ValueError, 'max_query_count'):
             _require_full_workload_opt_in(1, 0, 'TEST_ALLOW_FULL')
+
+    def test_rdf_baseline_coverage_is_configuration_driven(self):
+        records = [
+            {'result_count': 2, 'result_fingerprint': 'a'},
+            {'result_count': 0, 'result_fingerprint': 'b'},
+            {'result_count': 0, 'result_fingerprint': 'b'},
+        ]
+        validate_coverage(records, {
+            'non_empty_records': 1,
+            'empty_records': 2,
+            'distinct_fingerprints': 2,
+        })
+        with self.assertRaisesRegex(ValueError, 'empty_records mismatch'):
+            validate_coverage(records, {'empty_records': 1})
+
+    def test_rdf_baseline_coverage_rejects_unknown_fields(self):
+        with self.assertRaisesRegex(ValueError, 'Unsupported coverage fields'):
+            validate_coverage([], {'benchmark_specific_rule': 1})
+
+    def test_dbbench_baseline_resource_is_compatibility_wrapper(self):
+        self.assertTrue(issubclass(DBBenchBaselineResource, RdfBaselineResource))
+
+    def test_dbbench_baseline_declares_generic_schema_and_coverage(self):
+        path = Path(__file__).resolve().parents[2] / (
+            'benchmark-integration/dbbench-manifest/data/shared/dbbench/'
+            'dbpedia-10m-baseline.json'
+        )
+        baseline = json.loads(path.read_text(encoding='utf-8'))
+        self.assertEqual(baseline['schema'], 'rdf-query-baseline-v1')
+        self.assertEqual(baseline['coverage'], {
+            'non_empty_records': 3,
+            'empty_records': 3,
+            'distinct_fingerprints': 4,
+        })
 
     def test_dbbench_semantic_signature_ignores_runtime_fields(self):
         first = [

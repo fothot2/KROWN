@@ -61,5 +61,10 @@
       "status": "ok"
     }
   ],
-  "schema": "dbbench-smoke-baseline-v1"
+  "schema": "rdf-query-baseline-v1",
+  "coverage": {
+    "non_empty_records": 3,
+    "empty_records": 3,
+    "distinct_fingerprints": 4
+  }
 }
