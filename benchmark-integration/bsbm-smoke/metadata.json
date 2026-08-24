@@ -45,7 +45,7 @@
         "benchmark": "bsbm",
         "benchmark_root": "/users/u0182905/benchmarks",
         "manifest_file": "manifests/bsbm.json",
-        "dataset_file": "bsbm/dataset.ttl",
+        "dataset_file": "bsbm/dataset.nt",
         "results_file": "raw/bsbm.jsonl",
         "experiment_id": "bsbm-generic-smoke-rdflib",
         "system": "rdflib",
