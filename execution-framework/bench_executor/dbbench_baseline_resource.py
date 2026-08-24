@@ -39,6 +39,14 @@ def _semantic_record(record: dict) -> dict:
     return {field: record[field] for field in fields}
 
 
+def semantic_signature(records: list[dict]) -> list[dict]:
+    # Return deterministic semantic fields and omit runtime measurements.
+    return sorted(
+        (_semantic_record(record) for record in records),
+        key=lambda item: (item['query_id'], item['phase'], item['run']),
+    )
+
+
 class DBBenchBaselineResource:
     """Check DBBench identities, provenance, and semantic results."""
     def __init__(self, data_path: str, config_path: str, directory: str, verbose: bool):
@@ -77,8 +85,8 @@ class DBBenchBaselineResource:
             if manifest_hash != expected_manifest['sha256']:
                 raise ValueError('DBBench smoke manifest SHA-256 mismatch')
             records = _read_jsonl(results_path)
-            expected = sorted(baseline['records'], key=lambda item: (item['query_id'], item['phase'], item['run']))
-            actual = sorted((_semantic_record(record) for record in records), key=lambda item: (item['query_id'], item['phase'], item['run']))
+            expected = semantic_signature(baseline['records'])
+            actual = semantic_signature(records)
             if actual != expected:
                 raise ValueError('DBBench smoke semantic records differ from baseline')
             dataset_hash = dataset['sha256']

@@ -51,6 +51,20 @@ def _load_results(path: Path) -> list[dict]:
     return records
 
 
+def _require_full_workload_opt_in(
+        query_count: int, max_query_count: int, allow_full_env: str) -> None:
+    """Reject large manifests unless one named environment variable is set."""
+    if max_query_count < 1:
+        raise ValueError('max_query_count must be at least 1')
+    if query_count <= max_query_count:
+        return
+    if os.environ.get(allow_full_env) != '1':
+        raise ValueError(
+            f'DBBench manifest contains {query_count} queries, above the safe limit '
+            f'{max_query_count}; set {allow_full_env}=1 to allow full execution'
+        )
+
+
 class DBBenchQueryResource:
     """Execute a DBBench manifest through the standalone benchmark CLI."""
 
@@ -75,7 +89,9 @@ class DBBenchQueryResource:
                 warmup_runs: int = 1, measured_runs: int = 5,
                 timeout_s: float = 60.0, resume: bool = False,
                 benchmark_command: str = 'vortex-rdf-bench',
-                benchmark_root: str | None = None) -> bool:
+                benchmark_root: str | None = None,
+                max_query_count: int = 100,
+                allow_full_env: str = 'KROWN_DBBENCH_ALLOW_FULL') -> bool:
         """Run and validate one standalone DBBench execution artifact."""
         temporary = None
         try:
@@ -89,6 +105,9 @@ class DBBenchQueryResource:
                 self._shared_directory, results_file, 'Output'
             )
             manifest = _load_query_manifest(str(manifest_path))
+            _require_full_workload_opt_in(
+                len(manifest.queries), max_query_count, allow_full_env
+            )
             temporary = temporary_output(results_path, seed=resume)
             command, environment = standalone_command(
                 benchmark_command, benchmark_root
