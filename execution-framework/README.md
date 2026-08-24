@@ -283,6 +283,129 @@ cd tests
 ./unit_tests
 ```
 
+
+## Standalone DBBench workflow
+
+KROWN delegates DBBench query discovery, manifest preparation, and RDFLib execution to the public `vortex-rdf-bench` interface. KROWN owns scenario orchestration, external dataset staging, artifact collection, and baseline validation. This keeps benchmark semantics in the benchmarks package and keeps the KROWN resources thin.
+
+The reference scenario is stored at:
+
+```text
+benchmark-integration/dbbench-manifest
+```
+
+It performs five steps:
+
+1. Generate the canonical 3,642-query manifest.
+2. Generate a deterministic six-query semantic smoke manifest.
+3. Stage an external RDF dataset inside `data/shared`.
+4. Execute the smoke manifest with RDFLib.
+5. Validate the JSONL output against the committed DBpedia 10M baseline.
+
+### Benchmark command mode
+
+The default resources call an installed command:
+
+```text
+vortex-rdf-bench
+```
+
+For development, set the resource parameter `benchmark_root` to a benchmarks checkout. KROWN then invokes `python -m benchmark_core.cli` and extends `PYTHONPATH` for that process only.
+
+### DBpedia 10M smoke run
+
+The smoke baseline expects this dataset identity:
+
+```text
+logical name: dbpedia-10m
+format: N-Triples
+size: 1,642,607,409 bytes
+SHA-256: 82684ef2080b2004a25066bed38292cf40d7da64dcd8130c5057ff15d9c5317a
+```
+
+Set the source dataset path through the environment. Do not copy the dataset into the repository.
+
+```bash
+KROWN_DBBENCH_DATASET=/path/to/dbpedia_10M.nt \
+./execution-framework/exectool \
+  --runs=1 \
+  --root=/path/to/KROWN/benchmark-integration/dbbench-manifest \
+  run
+```
+
+The scenario uses hard-link staging. The source and KROWN must therefore be on the same filesystem. Change the metadata staging mode to `copy` when a hard link is not possible. Copy mode can duplicate a large dataset, so use it explicitly.
+
+The cleaner removes only the staged file and its private ownership marker. It does not remove the external source dataset.
+
+### Semantic smoke baseline
+
+The smoke selection contains six canonical queries:
+
+- Three queries with observed non-empty results on the DBpedia 10M fragment.
+- Three queries with intentional empty results.
+
+The committed baseline checks:
+
+- Dataset size and SHA-256.
+- Manifest dataset, workload, query count, and SHA-256.
+- Exact query IDs, phases, run numbers, statuses, counts, and fingerprints.
+- Dataset and manifest provenance in every record.
+- Duplicate execution keys.
+- Three non-empty and three empty results.
+- Four distinct result fingerprints.
+
+Repeatability comparisons use semantic signatures. They ignore runtime-dependent fields such as `elapsed_ns`, `client_elapsed_ns`, and execution order.
+
+### Full-workload guard
+
+`DBBenchQueryResource` allows at most 100 queries by default. A larger manifest is rejected before RDFLib starts. To run the full 3,642-query manifest deliberately, set:
+
+```bash
+KROWN_DBBENCH_ALLOW_FULL=1
+```
+
+A full-run scenario must point `manifest_file` to `manifests/dbbench.json`. Keep explicit values for `timeout_s`, `warmup_runs`, and `measured_runs`. The existing reference scenario remains a six-query smoke run even when the environment variable is set.
+
+### Artifacts and atomic output
+
+`DBBenchQueryResource` is the sole owner of:
+
+```text
+raw/dbbench-smoke.jsonl
+```
+
+`DBBenchBaselineResource` consumes that path through `results_input_file`, so KROWN does not collect the same artifact twice. Successful artifacts are moved under:
+
+```text
+benchmark-integration/dbbench-manifest/results/run_N/
+```
+
+The query resource writes to a private sibling temporary file. It validates JSONL structure, the shared result contract, provenance, query IDs, record counts, and duplicate keys before atomically replacing the declared artifact. A command failure or validation failure preserves any existing final artifact and removes the temporary file.
+
+### Common failures
+
+- `Environment variable is not set: KROWN_DBBENCH_DATASET`: set the external dataset path.
+- `External RDF dataset SHA-256 mismatch`: use the expected DBpedia 10M fragment or update the baseline deliberately.
+- `Input path leaves the shared directory`: do not stage an external symbolic link. Use hard-link or copy mode.
+- `DBBench manifest contains ... above the safe limit`: use the six-query smoke manifest, or set `KROWN_DBBENCH_ALLOW_FULL=1` for an intentional full run.
+- `DBBench smoke semantic records differ from baseline`: the dataset, manifest, benchmark behavior, or expected baseline changed.
+- `Artifact is not an existing file`: ensure only the producing resource uses a `results_file` or `output_file` parameter. Read-only consumers must use input-only parameter names.
+
+### Focused validation
+
+Run the DBBench regression tests from the repository root:
+
+```bash
+python execution-framework/tests/unit_tests \
+  UnitTests.test_dbbench_query_resource_runs_public_cli \
+  UnitTests.test_dbbench_query_resource_preserves_output_after_failures \
+  UnitTests.test_dbbench_full_workload_guard_requires_explicit_opt_in \
+  UnitTests.test_dbbench_semantic_signature_ignores_runtime_fields \
+  UnitTests.test_external_rdf_dataset_resource_hardlinks_and_cleans \
+  UnitTests.test_external_rdf_dataset_resource_rejects_hash_mismatch \
+  -v
+```
+
 ## Citation
 
 See main [README](../README.md).
