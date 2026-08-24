@@ -35,6 +35,8 @@ from bench_executor.benchmark_result import SCHEMA_VERSION, \
 from bench_executor.rdf_query_benchmark import _load_query_manifest, \
         _QueryOutcome, _QueryTimeoutError, _RdfQueryAdapter, \
         _RdfQueryBenchmark  # noqa: E402
+from bench_executor.rdf_workload_contract import (  # noqa: E402
+        load_rdf_workload_manifest, normalize_rdf_workload_manifest)
 from bench_executor.sparql_result import _normalize_term, \
         normalize_materialized_result, \
         normalize_sparql_json_result  # noqa: E402
@@ -1702,6 +1704,94 @@ class UnitTests(unittest.TestCase):
         self.assertEqual(semantic_signature(first), semantic_signature(second))
         changed = [dict(second[0], result_fingerprint='different'), second[1]]
         self.assertNotEqual(semantic_signature(first), semantic_signature(changed))
+
+
+    @staticmethod
+    def _generic_workload_manifest(**updates):
+        manifest = {
+            'schema_version': 1,
+            'workload': 'generic-smoke',
+            'dataset': 'dataset-v1',
+            'query_count': 2,
+            'queries': [
+                {
+                    'query_id': 'family/q001',
+                    'query': 'SELECT * WHERE { ?s ?p ?o }',
+                    'query_result_type': 'SELECT',
+                    'comparison_mode': 'unordered_fingerprint',
+                    'family': 'lookup',
+                },
+                {
+                    'query_id': 'family/q002',
+                    'query': 'ASK { ?s ?p ?o }',
+                    'query_result_type': 'ASK',
+                    'comparison_mode': 'boolean',
+                },
+            ],
+            'source': {'adapter': 'example'},
+        }
+        manifest.update(updates)
+        return manifest
+
+    def test_rdf_workload_contract_normalizes_adapter_output(self):
+        source = self._generic_workload_manifest()
+        normalized = normalize_rdf_workload_manifest(source)
+        self.assertEqual(normalized.workload, 'generic-smoke')
+        self.assertEqual(normalized.dataset, 'dataset-v1')
+        self.assertEqual(normalized.query_count, 2)
+        self.assertEqual(
+            [query.query_id for query in normalized.queries],
+            ['family/q001', 'family/q002'],
+        )
+        self.assertEqual(normalized.queries[0].metadata['family'], 'lookup')
+        self.assertEqual(normalized.metadata['source'], {'adapter': 'example'})
+        self.assertEqual(source, self._generic_workload_manifest())
+
+    def test_rdf_workload_contract_preserves_dbbench_shape(self):
+        source = self._generic_workload_manifest()
+        normalized = normalize_rdf_workload_manifest(source)
+        self.assertEqual(normalized.to_dict(), source)
+
+    def test_rdf_workload_contract_requires_identity_fields(self):
+        for field in ('workload', 'dataset'):
+            with self.subTest(field=field):
+                source = self._generic_workload_manifest()
+                source[field] = ''
+                with self.assertRaisesRegex(ValueError, field):
+                    normalize_rdf_workload_manifest(source)
+
+    def test_rdf_workload_contract_rejects_unstable_query_ids(self):
+        cases = (' q1', 'q1 ', 'q1\nnext')
+        for query_id in cases:
+            with self.subTest(query_id=query_id):
+                source = self._generic_workload_manifest()
+                source['queries'][0]['query_id'] = query_id
+                with self.assertRaisesRegex(ValueError, 'query_id'):
+                    normalize_rdf_workload_manifest(source)
+        source = self._generic_workload_manifest()
+        source['queries'][1]['query_id'] = source['queries'][0]['query_id']
+        with self.assertRaisesRegex(ValueError, 'Duplicate query_id'):
+            normalize_rdf_workload_manifest(source)
+
+    def test_rdf_workload_contract_validates_comparison_metadata(self):
+        cases = (
+            ('query_result_type', 1),
+            ('comparison_mode', ''),
+        )
+        for field, value in cases:
+            with self.subTest(field=field):
+                source = self._generic_workload_manifest()
+                source['queries'][0][field] = value
+                with self.assertRaisesRegex(ValueError, field):
+                    normalize_rdf_workload_manifest(source)
+
+    def test_rdf_workload_contract_loads_json_without_adapter_coupling(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'workload.json'
+            source = self._generic_workload_manifest()
+            path.write_text(json.dumps(source), encoding='utf-8')
+            loaded = load_rdf_workload_manifest(path)
+            self.assertEqual(loaded.to_dict(), source)
 
 
 if __name__ == '__main__':
