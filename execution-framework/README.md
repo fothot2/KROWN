@@ -459,3 +459,8 @@ A SPARQL HTTP server adapter controls one query server that receives SPARQL quer
 #### QLever lifecycle adapter
 
 `QLeverSystemAdapter` connects `qlever/default` to the stock KROWN container, Docker, logger, executor, and SPARQL HTTP code. It verifies one N-Triples source file. It then runs an explicit index command in a short-lived container and an explicit server command in a second container. The image must use a pinned tag and must not use `latest`. KROWN does not guess QLever memory, index, or server parameters. Experiment configuration must record the exact image and commands.
+
+
+### Fuseki 6.2.0 container
+
+KROWN pins `fuseki/default` to Apache Jena Fuseki 6.2.0. The Docker build uses Java 21 and verifies the official release archive with SHA-512. The repository no longer stores an unpacked Jena distribution. Docker Compose remains an optional manual development path. The KROWN executor continues to own the experiment lifecycle.

@@ -2497,6 +2497,24 @@ class UnitTests(unittest.TestCase):
             tracker.advance(LifecycleOperation.PREPARE)
 
 
+    def test_fuseki_modernization_pins_verified_jena_6(self):
+        from bench_executor import fuseki
+        root = Path(__file__).resolve().parents[1]
+        dockerfile = (root / 'dockers/Fuseki/Dockerfile').read_text()
+        compose = (root / 'dockers/Fuseki/docker-compose.yaml').read_text()
+
+        self.assertEqual(fuseki.VERSION, '6.2.0')
+        self.assertIn('FROM eclipse-temurin:21-jre-jammy', dockerfile)
+        self.assertIn('sha512sum --check --strict', dockerfile)
+        self.assertIn('kgconstruct/fuseki:v6.2.0', compose)
+        self.assertNotIn('latest', dockerfile + compose)
+
+    def test_fuseki_modernization_removes_vendored_distribution(self):
+        root = Path(__file__).resolve().parents[1]
+        self.assertFalse((root / 'dockers/Fuseki/apache-jena-4.6.1').exists())
+
+
+
 if __name__ == '__main__':
     # SELinux causes weird permission denied issues, warn users
     try:

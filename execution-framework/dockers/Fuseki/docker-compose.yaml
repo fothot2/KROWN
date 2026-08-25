@@ -1,32 +1,15 @@
-## Licensed under the terms of http://www.apache.org/licenses/LICENSE-2.0
-# Licensed to the Apache Software Foundation (ASF) under one
-# or more contributor license agreements.  See the NOTICE file
-# distributed with this work for additional information
-# regarding copyright ownership.  The ASF licenses this file
-# to you under the Apache License, Version 2.0 (the
-# "License"); you may not use this file except in compliance
-# with the License.  You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
-version: '3.0'
 services:
   fuseki:
-    ## Example:
-    ## command: [ "--tdb2", "--update", "--loc", "databases/DB2", "/ds" ]
     build:
       context: .
       dockerfile: Dockerfile
-    image: fuseki
+      args:
+        JENA_VERSION: "6.2.0"
+        FUSEKI_SHA512: "ba65f5867d2d4741b2ed9e2af5a0d4fbb447909894ab2a0c6bc4dac8997f4fe339c87b13c48d45d054977769f0f8bf763ea346b1f7792d5cdc458041bd43a132"
+    image: kgconstruct/fuseki:v6.2.0
+    command: ["--tdb2", "--update", "--loc", "/fuseki/databases/DB", "/ds"]
     ports:
       - "3030:3030"
     volumes:
       - ./logs:/fuseki/logs
       - ./databases:/fuseki/databases
-#volumes:

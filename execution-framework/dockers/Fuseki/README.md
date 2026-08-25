@@ -1,109 +1,38 @@
-# Apache Jena Fuseki Docker Tools
+# Apache Jena Fuseki 6.2.0 container
 
-This package contains a Dockerfile, docker-compose file, and helper scripts to
-create a docker container for Apache Jena Fuseki.
+This Docker context builds the Fuseki server used by KROWN. It downloads the official Apache Jena Fuseki 6.2.0 binary distribution and verifies its SHA-512 value before extraction.
 
-The docker container is based on 
-[Fuseki main](https://jena.apache.org/documentation/fuseki2/fuseki-main)
-for running a SPARQL server.
+## Requirements
 
-There is no UI - all configuration is by command line and all usage by via the
-network protocols.
-
-Databases can be mounted outside the docker container so they are preserved when
-the container terminates.
-
-This build system allows the user to customize the docker image.
-
-The docker build downloads the server binary from 
-[Maven central](https://repo1.maven.org/maven2/org/apache/jena/jena-fuseki-server/),
-checking the download against the SHA1 checksum.
-
-## Database
-
-There is a volume mapping "./databases" in the current directory into the server.
-This can be used to contain databases outside, but accessible to, the container
-that do not get deleted when the container exits.
-
-See examples below.
+- Docker with the `docker build` command.
+- Docker Compose is optional. KROWN does not depend on it.
 
 ## Build
 
-Choose the version number of Apache Jena release you wish to use. This toolkit
-defaults to the version of the overall Jena release it was part of. It is best
-to use the release of this set of tools from the same release of the desired
-server.
+```bash
+docker build \
+  --build-arg JENA_VERSION=6.2.0 \
+  --build-arg FUSEKI_SHA512=ba65f5867d2d4741b2ed9e2af5a0d4fbb447909894ab2a0c6bc4dac8997f4fe339c87b13c48d45d054977769f0f8bf763ea346b1f7792d5cdc458041bd43a132 \
+  --tag kgconstruct/fuseki:v6.2.0 .
+```
 
-    docker-compose build --build-arg JENA_VERSION=3.16.0
+The image uses Java 21. It does not use the host Java runtime.
 
-Note the build command must provide the version number.
+## Run
 
-## Test Run
+```bash
+docker run --rm --publish 3030:3030 \
+  --volume "$PWD/databases:/fuseki/databases" \
+  kgconstruct/fuseki:v6.2.0 \
+  --tdb2 --update --loc /fuseki/databases/DB /ds
+```
 
-`docker-compose run` cam be used to test the build from the previous section.
+The SPARQL query endpoint is `http://localhost:3030/ds/sparql`. The Graph Store Protocol endpoint is `http://localhost:3030/ds`.
 
-Examples:
+## Compose
 
-Start Fuseki with an in-memory, updatable dataset at http://<i>host</i>:3030/ds
+The tracked `docker-compose.yaml` provides the same version, image name, command, ports, and volumes. Compose is a manual development path. The KROWN executor uses its own Docker abstraction.
 
-    docker-compose run --rm --service-ports fuseki --mem /ds
+## Source policy
 
-Load a TDB2 database, and expose, read-only, via docker:
-
-    mkdir -p databases/DB2
-    tdb2.tdbloader --loc databases/DB2 MyData.ttl
-    # Publish read-only
-    docker-compose run --rm --name MyServer --service-ports fuseki --tdb2 --loc databases/DB2 /ds
-
-To allow update on the database, add `--update`. Updates are persisted.
-
-    docker-compose run --rm --name MyServer --service-ports fuseki --tdb2 --update --loc databases/DB2 /ds
-
-See
-[fuseki-configuration](https://jena.apache.org/documentation/fuseki2/fuseki-configuration.html)
-for more information on command line arguments.
-
-To use `docker-compose up`, edit the `docker-compose.yaml` to set the Fuseki
-command line arguments appropriately.
-
-## Layout
-
-The default layout in the container is:
-
-| Path  | Use | 
-| ----- | --- |
-| /opt/java-minimal | A reduced size Java runtime                      |
-| /fuseki | The Fuseki installation                                    |
-| /fuseki/log4j2.properties | Logging configuration                    |
-| /fuseki/databases/ | Directory for a volume for persistent databases |
-
-## Setting JVM arguments
-
-Use `JAVA_OPTIONS`:
-
-    docker-compose run --service-ports --rm -e JAVA_OPTIONS="-Xmx1048m -Xms1048m" --name MyServer fuseki --mem /ds
-
-## Docker Commands
-
-If you prefer to use `docker` directly:
-
-Build:
-
-    docker build --force-rm --build-arg JENA_VERSION=3.16.0 -t fuseki .
-
-Run:
-
-    docker run -i --rm -p "3030:3030" --name MyServer -t fuseki --mem /ds
-
-With databases on a bind mount to host filesystem directory:
-
-    MNT="--mount type=bind,src=$PWD/databases,dst=/fuseki/databases"
-    docker run -i --rm -p "3030:3030" $MNT --name MyServer -t fuseki --tdb2 --update --loc databases/DB2 /ds
-
-## Version specific notes:
-
-* Versions of Jena up to 3.14.0 use Log4j1 for logging. The docker will build will ignore
-   the log4j2.properties file
-* Version 3.15.0: When run, a warning will be emitted.  
-  `WARNING: sun.reflect.Reflection.getCallerClass is not supported. This will impact performance.`  
-  This can be ignored.
+Do not commit an unpacked Apache Jena distribution. The Docker build verifies the official archive and then extracts it inside the image.

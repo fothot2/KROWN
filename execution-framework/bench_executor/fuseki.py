@@ -15,7 +15,7 @@ from typing import Dict
 from bench_executor.container import Container
 from bench_executor.logger import Logger
 
-VERSION = '4.6.1'
+VERSION = '6.2.0'
 CMD_ARGS = '--tdb2 --update --loc /fuseki/databases/DB /ds'
 DATABASE_CONTAINER_PATH = '/fuseki/databases/DB'
 

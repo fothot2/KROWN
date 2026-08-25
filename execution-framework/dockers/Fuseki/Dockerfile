@@ -1,117 +1,37 @@
-## Licensed to the Apache Software Foundation (ASF) under one or more
-## contributor license agreements.  See the NOTICE file distributed with
-## this work for additional information regarding copyright ownership.
-## The ASF licenses this file to You under the Apache License, Version 2.0
-## (the "License"); you may not use this file except in compliance with
-## the License.  You may obtain a copy of the License at
-##
-##     http://www.apache.org/licenses/LICENSE-2.0
-## 
-## Unless required by applicable law or agreed to in writing, software
-## distributed under the License is distributed on an "AS IS" BASIS,
-## WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-## See the License for the specific language governing permissions and
-## limitations under the License.
+# Apache Jena Fuseki 6.2.0 for reproducible KROWN experiments.
+FROM eclipse-temurin:21-jre-jammy
 
-## Apache Jena Fuseki server Dockerfile.
+ARG JENA_VERSION=6.2.0
+ARG FUSEKI_SHA512=ba65f5867d2d4741b2ed9e2af5a0d4fbb447909894ab2a0c6bc4dac8997f4fe339c87b13c48d45d054977769f0f8bf763ea346b1f7792d5cdc458041bd43a132
+ARG FUSEKI_ARCHIVE=apache-jena-fuseki-${JENA_VERSION}.tar.gz
+ARG FUSEKI_URL=https://dlcdn.apache.org/jena/binaries/${FUSEKI_ARCHIVE}
 
-## This Dockefile builds a reduced footprint container.
+RUN apt-get update \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates curl \
+ && rm -rf /var/lib/apt/lists/*
 
-ARG OPENJDK_VERSION=17
-ARG ALPINE_VERSION=3.15.0
-ARG JENA_VERSION=""
+RUN mkdir -p /fuseki /fuseki/databases /fuseki/logs \
+ && curl --fail --location --retry 5 --retry-all-errors \
+      --output /tmp/${FUSEKI_ARCHIVE} ${FUSEKI_URL} \
+ && echo "${FUSEKI_SHA512}  /tmp/${FUSEKI_ARCHIVE}" | sha512sum --check --strict \
+ && tar --extract --gzip --file /tmp/${FUSEKI_ARCHIVE} \
+      --directory /fuseki --strip-components=1 \
+ && rm /tmp/${FUSEKI_ARCHIVE}
 
-# Internal, passed between stages.
-ARG FUSEKI_DIR=/fuseki
-ARG FUSEKI_JAR=jena-fuseki-server-${JENA_VERSION}.jar
-ARG JAVA_MINIMAL=/opt/java-minimal
+COPY entrypoint.sh /fuseki/entrypoint.sh
+COPY log4j2.properties /fuseki/log4j2.properties
 
-## ---- Stage: Download and build java.
-FROM openjdk:${OPENJDK_VERSION}-alpine AS base
+RUN useradd --system --home-dir /fuseki --shell /usr/sbin/nologin fuseki \
+ && chown -R fuseki:fuseki /fuseki \
+ && chmod 0755 /fuseki/entrypoint.sh /fuseki/fuseki-server
 
-ARG JAVA_MINIMAL
-ARG JENA_VERSION
-ARG FUSEKI_DIR
-ARG FUSEKI_JAR
-ARG REPO=https://repo1.maven.org/maven2
-ARG JAR_URL=${REPO}/org/apache/jena/jena-fuseki-server/${JENA_VERSION}/${FUSEKI_JAR}
+ENV FUSEKI_DIR=/fuseki \
+    FUSEKI_BASE=/fuseki \
+    JENA_VERSION=${JENA_VERSION} \
+    JAVA_OPTIONS="-Xmx2048m -Xms2048m"
 
-RUN [ "${JENA_VERSION}" != "" ] || { echo -e '\n**** Set JENA_VERSION ****\n' ; exit 1 ; }
-RUN echo && echo "==== Docker build for Apache Jena Fuseki ${JENA_VERSION} ====" && echo
-
-# Alpine: For objcopy used in jlink
-RUN apk add --no-cache curl binutils
-
-## -- Fuseki installed and runs in /fuseki.
-WORKDIR $FUSEKI_DIR
-
-## -- Download the jar file.
-COPY download.sh .
-RUN chmod a+x download.sh
-
-# Download, with check of the SHA1 checksum.
-RUN ./download.sh --chksum sha1 "$JAR_URL"
-
-## -- Alternatives to download : copy already downloaded.
-## COPY ${FUSEKI_JAR} .
-
-## Use Docker ADD - does not retry, does not check checksum, and may run every build.
-## ADD "$JAR_URL"
-
-## -- Make reduced Java JDK
-
-ARG JDEPS_EXTRA="jdk.crypto.cryptoki,jdk.crypto.ec"
-RUN \
-  JDEPS="$(jdeps --multi-release base --print-module-deps --ignore-missing-deps ${FUSEKI_JAR})"  && \
-  jlink \
-        --compress 2 --strip-debug --no-header-files --no-man-pages \
-        --output "${JAVA_MINIMAL}" \
-        --add-modules "${JDEPS},${JDEPS_EXTRA}"
-
-ADD entrypoint.sh .
-ADD log4j2.properties .
-
-# Run as this user
-# -H : no home directorry
-# -D : no password
-
-RUN adduser -H -D fuseki fuseki
-
-## ---- Stage: Build runtime
-FROM alpine:${ALPINE_VERSION}
-
-## Import ARGs
-ARG JENA_VERSION
-ARG JAVA_MINIMAL
-ARG FUSEKI_DIR
-ARG FUSEKI_JAR
-
-COPY --from=base /opt/java-minimal /opt/java-minimal
-COPY --from=base /fuseki /fuseki
-COPY --from=base /etc/passwd /etc/passwd
-
-WORKDIR $FUSEKI_DIR
-
-ARG LOGS=${FUSEKI_DIR}/logs
-ARG DATA=${FUSEKI_DIR}/databases
-
-RUN \
-    mkdir -p $LOGS && \
-    mkdir -p $DATA && \
-    chown -R fuseki ${FUSEKI_DIR} && \
-    chmod a+x entrypoint.sh 
-
-## Default environment variables.
-ENV \
-    JAVA_HOME=${JAVA_MINIMAL}           \
-    JAVA_OPTIONS="-Xmx2048m -Xms2048m"  \
-    JENA_VERSION=${JENA_VERSION}        \
-    FUSEKI_JAR="${FUSEKI_JAR}"          \
-    FUSEKI_DIR="${FUSEKI_DIR}"
-
+WORKDIR /fuseki
 USER fuseki
-
 EXPOSE 3030
-
-ENTRYPOINT ["./entrypoint.sh" ]
+ENTRYPOINT ["/fuseki/entrypoint.sh"]
 CMD []
