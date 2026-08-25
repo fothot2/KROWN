@@ -52,6 +52,9 @@ from bench_executor.dbbench_query_resource import DBBenchQueryResource  # noqa: 
 from bench_executor.experiment_matrix_contract import (  # noqa: E402
         ArtifactFile, DatasetArtifact, ExperimentSpecification,
         SystemConfiguration)
+from bench_executor.system_adapter_contract import (  # noqa: E402
+        LifecycleCapabilities, LifecycleOperation, LifecycleState,
+        LifecycleTracker, SystemAdapterSpecification)
 from bench_executor.rdf_manifest_resource import RdfManifestResource  # noqa: E402
 from bench_executor.rdf_query_resource import (  # noqa: E402
         RdfQueryResource, _require_full_workload_opt_in)
@@ -2053,6 +2056,85 @@ class UnitTests(unittest.TestCase):
             ArtifactFile('../dataset.hdt', 1, 'a' * 64)
         with self.assertRaisesRegex(ValueError, 'SHA-256'):
             ArtifactFile('dataset.hdt', 1, 'not-a-hash')
+
+
+    @staticmethod
+    def _system_adapter_spec(kind='server', system='fuseki',
+                             configuration='default', representation='rdf/source'):
+        system_configuration = SystemConfiguration(
+            system=system,
+            configuration=configuration,
+            kind=kind,
+            representation=representation,
+        )
+        return SystemAdapterSpecification(
+            configuration=system_configuration,
+            adapter='tests.fake-system-adapter',
+            capabilities=LifecycleCapabilities.for_kind(kind),
+        )
+
+    def test_system_adapter_server_lifecycle_requires_all_operations(self):
+        tracker = LifecycleTracker(self._system_adapter_spec())
+        tracker.run_plan((
+            LifecycleOperation.PREPARE,
+            LifecycleOperation.START,
+            LifecycleOperation.READY,
+            LifecycleOperation.EXECUTE,
+            LifecycleOperation.STOP,
+            LifecycleOperation.COLLECT,
+        ))
+        self.assertTrue(tracker.complete)
+        self.assertEqual(tracker.state, LifecycleState.COLLECTED)
+
+    def test_system_adapter_file_backed_lifecycle_omits_service_operations(self):
+        specification = self._system_adapter_spec(
+            kind='file-backed', system='comunica', configuration='hdt',
+            representation='hdt/default',
+        )
+        self.assertFalse(specification.capabilities.supports(LifecycleOperation.START))
+        tracker = LifecycleTracker(specification)
+        tracker.run_plan((
+            LifecycleOperation.PREPARE,
+            LifecycleOperation.EXECUTE,
+            LifecycleOperation.COLLECT,
+        ))
+        self.assertTrue(tracker.complete)
+
+    def test_system_adapter_embedded_lifecycle_matches_file_backed_shape(self):
+        specification = self._system_adapter_spec(
+            kind='embedded', system='vortex-rdf', configuration='indexed',
+            representation='vortex-rdf/indexed',
+        )
+        self.assertEqual(
+            specification.capabilities.operations,
+            LifecycleCapabilities.for_kind('file-backed').operations,
+        )
+
+    def test_system_adapter_lifecycle_rejects_out_of_order_operations(self):
+        tracker = LifecycleTracker(self._system_adapter_spec())
+        with self.assertRaisesRegex(ValueError, 'expected prepare'):
+            tracker.advance(LifecycleOperation.START)
+        tracker.advance(LifecycleOperation.PREPARE)
+        with self.assertRaisesRegex(ValueError, 'expected start'):
+            tracker.advance(LifecycleOperation.EXECUTE)
+
+    def test_system_adapter_lifecycle_rejects_kind_mismatch(self):
+        configuration = SystemConfiguration(
+            system='qlever', configuration='default', kind='server',
+            representation='rdf/source',
+        )
+        with self.assertRaisesRegex(ValueError, 'kind differs'):
+            SystemAdapterSpecification(
+                configuration=configuration,
+                adapter='tests.invalid',
+                capabilities=LifecycleCapabilities.for_kind('embedded'),
+            )
+
+    def test_system_adapter_failed_lifecycle_is_terminal(self):
+        tracker = LifecycleTracker(self._system_adapter_spec())
+        tracker.fail()
+        with self.assertRaisesRegex(ValueError, 'cannot advance'):
+            tracker.advance(LifecycleOperation.PREPARE)
 
 
 if __name__ == '__main__':

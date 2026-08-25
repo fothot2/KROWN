@@ -439,3 +439,7 @@ The BSBM smoke scenario validates 11 measured query instances from the externall
 ### Experiment matrix contracts
 
 The experiment matrix separates the logical workload from the query system and the physical dataset representation. `ExperimentSpecification` binds one benchmark, logical dataset, workload, dataset artifact, system configuration, and execution policy. `DatasetArtifact` records the source RDF identity and one physical representation such as `rdf/source`, `hdt/default`, `cottas/default`, or `vortex-rdf/<configuration>`. `SystemConfiguration` records a stable identity such as `fuseki/default`, `virtuoso/default`, `qlever/default`, `comunica/hdt`, `pycottas/default`, or `vortex-rdf/<configuration>`.
+
+### System adapter lifecycle contract
+
+The system adapter lifecycle is separate from the experiment matrix. Server adapters use `prepare`, `start`, `ready`, `execute`, `stop`, and `collect`. File-backed and embedded adapters use `prepare`, `execute`, and `collect`; they do not invent service startup operations. `SystemAdapterSpecification` binds the lifecycle to one `SystemConfiguration`. `LifecycleTracker` validates operation order only. It does not start Fuseki, Virtuoso, QLever, Comunica, pycottas, or Vortex-RDF. Concrete adapters will implement these operations in later patches.
