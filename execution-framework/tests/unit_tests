@@ -2543,6 +2543,29 @@ class UnitTests(unittest.TestCase):
 
 
 
+    def test_qlever_docker_context_pins_official_060_digest(self):
+        root = Path(__file__).resolve().parents[1]
+        dockerfile = (root / 'dockers/QLever/Dockerfile').read_text()
+        self.assertIn(
+            'adfreiburg/qlever@sha256:'
+            '37d5ede193f1bffb6aebf734d15d2a4c2a3228ee102858b0c6c2e65c149a78ec',
+            dockerfile,
+        )
+        self.assertNotIn(':latest', dockerfile)
+        self.assertNotIn('IndexBuilderMain', dockerfile)
+        self.assertNotIn('ServerMain', dockerfile)
+
+    def test_qlever_compose_preserves_explicit_command_contract(self):
+        root = Path(__file__).resolve().parents[1]
+        compose = (root / 'dockers/QLever/docker-compose.yaml').read_text()
+        self.assertIn('image: kgconstruct/qlever:v0.6.0', compose)
+        self.assertIn('QLEVER_COMMAND', compose)
+        self.assertIn('7001:7001', compose)
+        self.assertNotIn('IndexBuilderMain', compose)
+        self.assertNotIn('ServerMain', compose)
+
+
+
 if __name__ == '__main__':
     # SELinux causes weird permission denied issues, warn users
     try:

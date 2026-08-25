@@ -11,6 +11,7 @@ MYSQL_VERSION='8.0'
 POSTGRESQL_VERSION='14.5'
 VIRTUOSO_VERSION='7.2.17'
 FUSEKI_VERSION='6.2.0'
+QLEVER_VERSION='0.6.0'
 MORPHKGC_VERSION='2.2.0'
 MORPHRDB_VERSION='3.12.5'
 ONTOP_VERSION='5.0.0'
@@ -58,6 +59,13 @@ cd ..
 # docker build --build-arg JENA_VERSION=$FUSEKI_VERSION \
 #     -t kgconstruct/fuseki:v$FUSEKI_VERSION .
 # docker push kgconstruct/fuseki:v$FUSEKI_VERSION
+# cd ..
+
+# # QLever
+# echo "*** Building QLever $QLEVER_VERSION ... ***"
+# cd QLever
+# docker build -t kgconstruct/qlever:v$QLEVER_VERSION .
+# docker push kgconstruct/qlever:v$QLEVER_VERSION
 # cd ..
 
 # Morph-KGC

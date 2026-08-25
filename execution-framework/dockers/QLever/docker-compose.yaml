@@ -1,0 +1,13 @@
+services:
+  qlever:
+    image: kgconstruct/qlever:v0.6.0
+    build:
+      context: .
+      args:
+        QLEVER_IMAGE: adfreiburg/qlever@sha256:37d5ede193f1bffb6aebf734d15d2a4c2a3228ee102858b0c6c2e65c149a78ec
+    entrypoint: ["/bin/sh", "-lc"]
+    command: ["exec $${QLEVER_COMMAND:?Set QLEVER_COMMAND}"]
+    ports:
+      - "7001:7001"
+    volumes:
+      - "./data:/qlever"

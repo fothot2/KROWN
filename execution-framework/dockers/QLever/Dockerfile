@@ -1,0 +1,4 @@
+ARG QLEVER_IMAGE=adfreiburg/qlever@sha256:37d5ede193f1bffb6aebf734d15d2a4c2a3228ee102858b0c6c2e65c149a78ec
+FROM ${QLEVER_IMAGE}
+
+LABEL org.krown.system="qlever/default"       org.krown.qlever.version="0.6.0"       org.krown.upstream.digest="sha256:37d5ede193f1bffb6aebf734d15d2a4c2a3228ee102858b0c6c2e65c149a78ec"

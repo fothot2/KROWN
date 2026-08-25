@@ -460,6 +460,9 @@ A SPARQL HTTP server adapter controls one query server that receives SPARQL quer
 
 `QLeverSystemAdapter` connects `qlever/default` to the stock KROWN container, Docker, logger, executor, and SPARQL HTTP code. It verifies one N-Triples source file. It then runs an explicit index command in a short-lived container and an explicit server command in a second container. The image must use a pinned tag and must not use `latest`. KROWN does not guess QLever memory, index, or server parameters. Experiment configuration must record the exact image and commands.
 
+### QLever 0.6.0 container
+
+KROWN pins `qlever/default` to the official QLever 0.6.0 image digest. The local image keeps the upstream `qlever` entrypoint. It does not invent the removed `IndexBuilderMain` or `ServerMain` commands. The tracked Compose file is a manual template that requires one explicit `QLEVER_COMMAND`. The KROWN executor continues to own index construction and server startup as separate lifecycle operations.
 
 ### Fuseki 6.2.0 container
 
