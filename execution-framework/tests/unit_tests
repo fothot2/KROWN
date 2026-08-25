@@ -55,6 +55,8 @@ from bench_executor.experiment_matrix_contract import (  # noqa: E402
 from bench_executor.system_adapter_contract import (  # noqa: E402
         LifecycleCapabilities, LifecycleOperation, LifecycleState,
         LifecycleTracker, SystemAdapterSpecification)
+from bench_executor.sparql_http_system_adapter import (  # noqa: E402
+        SparqlHttpSystemAdapter, sparql_http_system_specifications)
 from bench_executor.rdf_manifest_resource import RdfManifestResource  # noqa: E402
 from bench_executor.rdf_query_resource import (  # noqa: E402
         RdfQueryResource, _require_full_workload_opt_in)
@@ -2129,6 +2131,114 @@ class UnitTests(unittest.TestCase):
                 adapter='tests.invalid',
                 capabilities=LifecycleCapabilities.for_kind('embedded'),
             )
+
+    def test_sparql_http_system_specifications_are_canonical(self):
+        specifications = sparql_http_system_specifications()
+
+        self.assertEqual(
+            [item.system_id for item in specifications],
+            ['fuseki/default', 'virtuoso/default', 'qlever/default'],
+        )
+        self.assertTrue(all(
+            item.configuration.kind == 'server'
+            and item.configuration.representation == 'rdf/source'
+            for item in specifications
+        ))
+
+    def test_sparql_http_system_adapter_runs_complete_lifecycle(self):
+        adapter = self._fake_sparql_http_system_adapter()
+        endpoints = []
+
+        result = adapter.run(lambda endpoint: endpoints.append(endpoint) or True)
+
+        self.assertTrue(result.success)
+        self.assertEqual(result.state, LifecycleState.COLLECTED)
+        self.assertEqual(
+            [item.value for item in result.history],
+            ['prepare', 'start', 'ready', 'execute', 'stop', 'collect'],
+        )
+        self.assertEqual(endpoints, ['http://localhost:9999/sparql'])
+        self.assertEqual(
+            adapter.calls,
+            ['prepare', 'start', 'ready', 'stop', 'collect'],
+        )
+
+    def test_sparql_http_system_adapter_stops_and_collects_after_execute_failure(self):
+        adapter = self._fake_sparql_http_system_adapter()
+
+        result = adapter.run(lambda endpoint: False)
+
+        self.assertFalse(result.success)
+        self.assertEqual(result.state, LifecycleState.FAILED)
+        self.assertEqual(result.failed_operation, LifecycleOperation.EXECUTE)
+        self.assertTrue(result.stop_attempted)
+        self.assertTrue(result.collect_attempted)
+        self.assertEqual(
+            adapter.calls,
+            ['prepare', 'start', 'ready', 'stop', 'collect'],
+        )
+
+    def test_sparql_http_system_adapter_collects_after_prepare_failure(self):
+        adapter = self._fake_sparql_http_system_adapter(fail='prepare')
+
+        result = adapter.run(lambda endpoint: True)
+
+        self.assertFalse(result.success)
+        self.assertEqual(result.failed_operation, LifecycleOperation.PREPARE)
+        self.assertFalse(result.stop_attempted)
+        self.assertTrue(result.collect_attempted)
+        self.assertEqual(adapter.calls, ['prepare', 'collect'])
+
+    def test_sparql_http_system_adapter_rejects_non_rdf_source_artifact(self):
+        specification = sparql_http_system_specifications()[0]
+        artifact = DatasetArtifact(
+            benchmark='bsbm', dataset='explore-1k', source_format='ntriples',
+            source_size_bytes=4, source_sha256='a' * 64,
+            representation='hdt/default',
+            files=(ArtifactFile(path='dataset.hdt', size_bytes=4, sha256='b' * 64),),
+        )
+
+        with self.assertRaisesRegex(ValueError, 'must use rdf/source'):
+            self._FakeSparqlHttpSystemAdapter(specification, artifact)
+
+    class _FakeSparqlHttpSystemAdapter(SparqlHttpSystemAdapter):
+        def __init__(self, specification, artifact, fail=None):
+            super().__init__(specification, artifact)
+            self.fail = fail
+            self.calls = []
+
+        @property
+        def endpoint(self):
+            return 'http://localhost:9999/sparql'
+
+        def _operation(self, name):
+            self.calls.append(name)
+            return self.fail != name
+
+        def prepare(self):
+            return self._operation('prepare')
+
+        def start(self):
+            return self._operation('start')
+
+        def ready(self):
+            return self._operation('ready')
+
+        def stop(self):
+            return self._operation('stop')
+
+        def collect(self):
+            return self._operation('collect')
+
+    def _fake_sparql_http_system_adapter(self, fail=None):
+        specification = sparql_http_system_specifications()[0]
+        artifact = DatasetArtifact(
+            benchmark='bsbm', dataset='explore-1k', source_format='ntriples',
+            source_size_bytes=4, source_sha256='a' * 64,
+            representation='rdf/source',
+            files=(ArtifactFile(path='dataset.nt', size_bytes=4, sha256='b' * 64),),
+        )
+        return self._FakeSparqlHttpSystemAdapter(specification, artifact, fail=fail)
 
     def test_system_adapter_failed_lifecycle_is_terminal(self):
         tracker = LifecycleTracker(self._system_adapter_spec())

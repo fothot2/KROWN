@@ -443,3 +443,7 @@ The experiment matrix separates the logical workload from the query system and t
 ### System adapter lifecycle contract
 
 The system adapter lifecycle is separate from the experiment matrix. Server adapters use `prepare`, `start`, `ready`, `execute`, `stop`, and `collect`. File-backed and embedded adapters use `prepare`, `execute`, and `collect`; they do not invent service startup operations. `SystemAdapterSpecification` binds the lifecycle to one `SystemConfiguration`. `LifecycleTracker` validates operation order only. It does not start Fuseki, Virtuoso, QLever, Comunica, pycottas, or Vortex-RDF. Concrete adapters will implement these operations in later patches.
+
+### SPARQL HTTP server adapter foundation
+
+A SPARQL HTTP server adapter controls one query server that receives SPARQL queries over HTTP. `SparqlHttpSystemAdapter` applies the shared server lifecycle to `fuseki/default`, `virtuoso/default`, and `qlever/default`. Each system requires the `rdf/source` representation. Concrete adapters provide preparation, startup, readiness, shutdown, and collection operations. The shared foundation accepts the workload execution function, passes the endpoint to it, validates operation results, and performs best-effort shutdown and collection after a failure. It does not generate datasets or contain benchmark-specific logic.
