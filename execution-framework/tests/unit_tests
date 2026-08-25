@@ -2515,6 +2515,34 @@ class UnitTests(unittest.TestCase):
 
 
 
+    def test_virtuoso_modernization_pins_verified_7217_binary(self):
+        from bench_executor import virtuoso
+        root = Path(__file__).resolve().parents[1]
+        dockerfile = (root / 'dockers/Virtuoso/Dockerfile').read_text()
+        compose = (root / 'dockers/Virtuoso/docker-compose.yaml').read_text()
+        entrypoint = (root / 'dockers/Virtuoso/entrypoint.sh').read_text()
+
+        self.assertEqual(virtuoso.VERSION, '7.2.17')
+        self.assertIn('45385ea8c1940e41d88d628f9318bbc992081c4cd5c4e18b57277b6df516b15b', dockerfile)
+        self.assertIn('sha256sum --check --strict', dockerfile)
+        self.assertNotIn('--retry-all-errors', dockerfile)
+        self.assertIn('libncurses5', dockerfile)
+        self.assertIn('kgconstruct/virtuoso:v7.2.17', compose)
+        self.assertIn("grep -i '^VIRT_'", entrypoint)
+        self.assertIn("sed -i -E '/^[[:space:]]*Load[0-9]+", entrypoint)
+        self.assertIn("virtuoso-t '-?' || [[ $? -eq 1 ]]", entrypoint)
+        self.assertNotIn('openlink/virtuoso-opensource-7:', dockerfile)
+
+    def test_virtuoso_modernization_preserves_runtime_contract(self):
+        root = Path(__file__).resolve().parents[1]
+        dockerfile = (root / 'dockers/Virtuoso/Dockerfile').read_text()
+        compose = (root / 'dockers/Virtuoso/docker-compose.yaml').read_text()
+        self.assertIn('WORKDIR /database', dockerfile)
+        self.assertIn('EXPOSE 1111 8890', dockerfile)
+        self.assertIn('/usr/share/proj', dockerfile + compose)
+
+
+
 if __name__ == '__main__':
     # SELinux causes weird permission denied issues, warn users
     try:

@@ -186,7 +186,7 @@ Currently, the following Dockers are officially supported:
 **Triplestores**
 
 - Fuseki 4.6.1
-- Virtuoso 7.2.7
+- Virtuoso 7.2.17
 
 **Tools**
 
@@ -464,3 +464,8 @@ A SPARQL HTTP server adapter controls one query server that receives SPARQL quer
 ### Fuseki 6.2.0 container
 
 KROWN pins `fuseki/default` to Apache Jena Fuseki 6.2.0. The Docker build uses Java 21 and verifies the official release archive with SHA-512. The repository no longer stores an unpacked Jena distribution. Docker Compose remains an optional manual development path. The KROWN executor continues to own the experiment lifecycle.
+
+
+### Virtuoso 7.2.17 container
+
+KROWN pins `virtuoso/default` to the official Virtuoso Open Source 7.2.17 generic Linux archive. The Docker build verifies SHA-256 before extraction. The image preserves the existing `/database`, `/usr/share/proj`, `VIRT_*`, SQL, and SPARQL contracts. Docker Compose is an optional manual development path.

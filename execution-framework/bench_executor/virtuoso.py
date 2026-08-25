@@ -18,7 +18,7 @@ from threading import Thread
 from bench_executor.container import Container
 from bench_executor.logger import Logger
 
-VERSION = '7.2.7'
+VERSION = '7.2.17'
 MAX_ROWS = '10000000'
 QUERY_TIMEOUT = '0'  # no limit
 MAX_VECTOR_SIZE = '3000000'  # max value is 'around' 3,500,000 from docs
