@@ -462,6 +462,11 @@ A SPARQL HTTP server adapter controls one query server that receives SPARQL quer
 
 ### QLever 0.6.0 container
 
+### External representation receipts
+
+KROWN loads `rdf-representation-receipt-v1` files from the benchmarks repository. It verifies every declared file and constructs a `DatasetArtifact`. KROWN does not generate RDF, HDT, COTTAS, or Vortex-RDF representations.
+
+
 KROWN pins `qlever/default` to the official QLever 0.6.0 image digest. The local image keeps the upstream `qlever` entrypoint. It does not invent the removed `IndexBuilderMain` or `ServerMain` commands. The tracked Compose file is a manual template that requires one explicit `QLEVER_COMMAND`. The KROWN executor continues to own index construction and server startup as separate lifecycle operations.
 
 ### Fuseki 6.2.0 container

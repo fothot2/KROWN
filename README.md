@@ -67,6 +67,9 @@ in each scenario, you can find them in the [samples](./samples) folder.
 
 ## RDF benchmark architecture
 
+Representation generation belongs to `/users/u0182905/benchmarks`. KROWN verifies representation receipts before execution.
+
+
 The generic RDF experiment boundary is documented in [execution-framework/RDF_BENCHMARK_ARCHITECTURE.md](execution-framework/RDF_BENCHMARK_ARCHITECTURE.md).
 
 ## Execution framework
