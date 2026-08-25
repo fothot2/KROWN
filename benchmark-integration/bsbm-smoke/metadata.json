@@ -54,6 +54,18 @@
         "timeout_s": 60.0,
         "large_workload_env": "KROWN_RDF_ALLOW_LARGE_WORKLOAD"
       }
+    },
+    {
+      "@id": "https://w3id.org/krown/benchmark-integration/bsbm-smoke/validate",
+      "name": "Validate BSBM Explore 1K semantic baseline",
+      "resource": "RdfBaselineResource",
+      "command": "execute",
+      "parameters": {
+        "baseline_file": "bsbm/explore-1k-baseline.json",
+        "manifest_file": "manifests/bsbm.json",
+        "dataset_file": "bsbm/dataset.nt",
+        "results_input_file": "raw/bsbm.jsonl"
+      }
     }
   ]
 }

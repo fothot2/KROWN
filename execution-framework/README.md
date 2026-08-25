@@ -427,3 +427,7 @@ A benchmark scenario can override these parameter values explicitly. Benchmark a
 ### BSBM adapter scenario
 
 Generate BSBM outside KROWN. Store the ignored dataset, official Explore CSV stream, generation receipt, and test-driver data under the separate benchmarks repository. Set `KROWN_BSBM_QUERY_STREAM`, `KROWN_BSBM_GENERATION_RECEIPT`, and `KROWN_RDF_DATASET_FILE`. The smoke scenario imports the first measured instance of each BSBM query template. KROWN does not download, configure, or run the BSBM generator.
+
+#### BSBM Explore 1K semantic baseline
+
+The BSBM smoke scenario validates 11 measured query instances from the externally generated Explore stream. The committed baseline checks the 95,715,671-byte dataset hash, the generated manifest identity and hash, exact query IDs, statuses, result counts, result fingerprints, and coverage. The observed coverage is eight non-empty results, three empty results, and nine distinct fingerprints. Runtime fields remain outside semantic comparison.

@@ -1,0 +1,110 @@
+{
+  "schema": "rdf-query-baseline-v1",
+  "dataset": {
+    "logical_name": "bsbm-explore-1k",
+    "format": "nt",
+    "size_bytes": 95715671,
+    "sha256": "deb8d48ce5440145a8261fd97acafce6c4fc1cf713447e6ed20d8035442b05df"
+  },
+  "manifest": {
+    "dataset": "bsbm-local",
+    "workload": "bsbm-explore-smoke",
+    "query_count": 11,
+    "sha256": "b280185839d1e6061bd8d469cb05ea172e2bfaf589b9a7c07b2910a6a2a7bb0c"
+  },
+  "records": [
+    {
+      "query_id": "explore/stream-001250/query-01",
+      "phase": "measured",
+      "run": 0,
+      "status": "ok",
+      "result_count": 0,
+      "result_fingerprint": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+    },
+    {
+      "query_id": "explore/stream-001251/query-02",
+      "phase": "measured",
+      "run": 0,
+      "status": "ok",
+      "result_count": 12,
+      "result_fingerprint": "9633a017762237f2b0f86fdb2c3b84a2d524c99b7071994577b95bd5de65471d"
+    },
+    {
+      "query_id": "explore/stream-001253/query-03",
+      "phase": "measured",
+      "run": 0,
+      "status": "ok",
+      "result_count": 0,
+      "result_fingerprint": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+    },
+    {
+      "query_id": "explore/stream-001256/query-04",
+      "phase": "measured",
+      "run": 0,
+      "status": "ok",
+      "result_count": 0,
+      "result_fingerprint": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+    },
+    {
+      "query_id": "explore/stream-001259/query-05",
+      "phase": "measured",
+      "run": 0,
+      "status": "ok",
+      "result_count": 2,
+      "result_fingerprint": "39b8b0e4016bbf1a5c7a5fe6b7a652c21d70855ac1c2a59e971e25aafa8f2f4e"
+    },
+    {
+      "query_id": "explore/stream-001260/query-07",
+      "phase": "measured",
+      "run": 0,
+      "status": "ok",
+      "result_count": 8,
+      "result_fingerprint": "2b182ec78425f0cb8299fe056b1ddadc3e7ce0689dff917b803393916a988516"
+    },
+    {
+      "query_id": "explore/stream-001265/query-08",
+      "phase": "measured",
+      "run": 0,
+      "status": "ok",
+      "result_count": 2,
+      "result_fingerprint": "4bf38a038642efc1dc1f862214d77cfdf0a4c42053a63322f291237adaf5596a"
+    },
+    {
+      "query_id": "explore/stream-001266/query-09",
+      "phase": "measured",
+      "run": 0,
+      "status": "ok",
+      "result_count": 6,
+      "result_fingerprint": "c43c3155d19118528466155b6eaf744de7100a61477580ba7286dd5eeb3f098c"
+    },
+    {
+      "query_id": "explore/stream-001271/query-10",
+      "phase": "measured",
+      "run": 0,
+      "status": "ok",
+      "result_count": 2,
+      "result_fingerprint": "9573fde85f1d8068107ca37d76ca988ae7eb61bbd7c791e5a5adcac944d531d1"
+    },
+    {
+      "query_id": "explore/stream-001273/query-11",
+      "phase": "measured",
+      "run": 0,
+      "status": "ok",
+      "result_count": 10,
+      "result_fingerprint": "e5f0f2024fa1de3898846f908f1d0fd687f1fda339bedd6b4a9b54e031c4ef51"
+    },
+    {
+      "query_id": "explore/stream-001274/query-12",
+      "phase": "measured",
+      "run": 0,
+      "status": "ok",
+      "result_count": 8,
+      "result_fingerprint": "c868d495b87fd4ba7dcd81c38f837a4cfc36cc8edb764113086d9e24a1b91255"
+    }
+  ],
+  "coverage": {
+    "non_empty_records": 8,
+    "empty_records": 3,
+    "distinct_fingerprints": 9
+  }
+}

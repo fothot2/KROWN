@@ -1514,10 +1514,35 @@ class UnitTests(unittest.TestCase):
         path = Path(__file__).resolve().parents[2] / 'benchmark-integration/bsbm-smoke/metadata.json'
         metadata = json.loads(path.read_text(encoding='utf-8'))
         self.assertEqual([step['resource'] for step in metadata['steps']], [
-            'RdfManifestResource', 'ExternalRdfDatasetResource', 'RdfQueryResource'])
+            'RdfManifestResource', 'ExternalRdfDatasetResource', 'RdfQueryResource',
+            'RdfBaselineResource'])
         self.assertEqual(metadata['steps'][2]['parameters']['benchmark'], 'bsbm')
         self.assertEqual(metadata['steps'][0]['parameters']['input_env'], 'KROWN_BSBM_QUERY_STREAM')
         self.assertEqual(metadata['steps'][0]['parameters']['adapter_options'], {'--selection': 'smoke'})
+
+
+    def test_bsbm_baseline_records_real_smoke_semantics(self):
+        root = Path(__file__).resolve().parents[2]
+        baseline_path = root / (
+            'benchmark-integration/bsbm-smoke/data/shared/bsbm/'
+            'explore-1k-baseline.json'
+        )
+        baseline = json.loads(baseline_path.read_text(encoding='utf-8'))
+        self.assertEqual(baseline['schema'], 'rdf-query-baseline-v1')
+        self.assertEqual(baseline['manifest']['query_count'], 11)
+        self.assertEqual(baseline['coverage'], {
+            'non_empty_records': 8,
+            'empty_records': 3,
+            'distinct_fingerprints': 9,
+        })
+        self.assertEqual(len(baseline['records']), 11)
+        self.assertTrue(all(record['status'] == 'ok'
+                            for record in baseline['records']))
+        self.assertEqual(
+            baseline['dataset']['sha256'],
+            'deb8d48ce5440145a8261fd97acafce6c4fc1cf713447e6ed20d8035442b05df',
+        )
+
 
     def test_rdf_manifest_resource_calls_adapter_and_validates_output(self):
         with tempfile.TemporaryDirectory() as directory:
