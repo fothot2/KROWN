@@ -455,3 +455,7 @@ A SPARQL HTTP server adapter controls one query server that receives SPARQL quer
 #### Virtuoso lifecycle adapter
 
 `VirtuosoSystemAdapter` connects `virtuoso/default` to the stock `Virtuoso` class. It verifies the N-Triples source file during preparation. It reuses stock database initialization, container readiness, parallel RDF loading, checkpoint restoration, endpoint, shutdown, database reset, logging, and executor collection. `loader_cores` selects the number of stock RDF loader threads. The adapter adds no second container or SPARQL client implementation.
+
+#### QLever lifecycle adapter
+
+`QLeverSystemAdapter` connects `qlever/default` to the stock KROWN container, Docker, logger, executor, and SPARQL HTTP code. It verifies one N-Triples source file. It then runs an explicit index command in a short-lived container and an explicit server command in a second container. The image must use a pinned tag and must not use `latest`. KROWN does not guess QLever memory, index, or server parameters. Experiment configuration must record the exact image and commands.

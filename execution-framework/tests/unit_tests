@@ -23,6 +23,8 @@ from bench_executor.container import Container  # noqa: E402
 from bench_executor.fuseki import Fuseki  # noqa: E402
 from bench_executor.fuseki_system_adapter import FusekiSystemAdapter  # noqa: E402
 from bench_executor.virtuoso_system_adapter import VirtuosoSystemAdapter  # noqa: E402
+from bench_executor.qlever import QLever  # noqa: E402
+from bench_executor.qlever_system_adapter import QLeverSystemAdapter  # noqa: E402
 from bench_executor.postgresql import PostgreSQL  # noqa: E402
 from bench_executor.mysql import MySQL  # noqa: E402
 from bench_executor.yarrrml import YARRRML  # noqa: E402
@@ -2390,6 +2392,103 @@ class UnitTests(unittest.TestCase):
                         artifact, 'data', 'config', 'log',
                         loader_cores=loader_cores,
                     )
+
+    def test_qlever_reuses_stock_container_for_index_and_server(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with patch('bench_executor.qlever.Container') as container:
+                indexer = MagicMock()
+                indexer.run_and_wait_for_exit.return_value = True
+                server = MagicMock()
+                server.run.return_value = True
+                server.started = True
+                server.stop.return_value = True
+                container.side_effect = [indexer, server]
+                qlever = QLever(
+                    os.path.join(directory, 'data'), directory, False,
+                    'adfreiburg/qlever:commit-deadbeef',
+                    'IndexBuilderMain explicit-index-command',
+                    'ServerMain explicit-server-command', 7001,
+                )
+
+                self.assertTrue(qlever.build_index())
+                self.assertTrue(qlever.start())
+                self.assertTrue(qlever.stop())
+
+            indexer.run_and_wait_for_exit.assert_called_once_with(
+                'IndexBuilderMain explicit-index-command')
+            server.run.assert_called_once_with('ServerMain explicit-server-command')
+            server.stop.assert_called_once_with()
+
+    def test_qlever_rejects_mutable_or_incomplete_configuration(self):
+        arguments = ('data', 'log', False)
+        invalid = [
+            ('adfreiburg/qlever:latest', 'index', 'server'),
+            ('adfreiburg/qlever', 'index', 'server'),
+            ('adfreiburg/qlever:commit-a', '', 'server'),
+            ('adfreiburg/qlever:commit-a', 'index', ''),
+        ]
+        for image, index_command, server_command in invalid:
+            with self.subTest(image=image, index_command=index_command):
+                with self.assertRaises(ValueError):
+                    QLever(*arguments, image, index_command, server_command)
+
+    def test_qlever_system_adapter_runs_explicit_lifecycle(self):
+        with tempfile.TemporaryDirectory() as directory:
+            shared = os.path.join(directory, 'data', 'shared')
+            os.makedirs(shared)
+            source = os.path.join(shared, 'dataset.nt')
+            with open(source, 'wb') as stream:
+                stream.write(b'<s> <p> <o> .\n')
+            artifact = DatasetArtifact(
+                benchmark='bsbm', dataset='explore-1k', source_format='ntriples',
+                source_size_bytes=os.path.getsize(source),
+                source_sha256=sha256_file(source), representation='rdf/source',
+                files=(ArtifactFile(
+                    path='dataset.nt', size_bytes=os.path.getsize(source),
+                    sha256=sha256_file(source),
+                ),),
+            )
+            stock = MagicMock()
+            stock.endpoint = 'http://localhost:7001'
+            stock.build_index.return_value = True
+            stock.start.return_value = True
+            stock.wait_until_ready.return_value = True
+            stock.stop.return_value = True
+            with patch('bench_executor.qlever_system_adapter.QLever',
+                       return_value=stock) as qlever:
+                adapter = QLeverSystemAdapter(
+                    artifact, os.path.join(directory, 'data'), directory,
+                    'adfreiburg/qlever:commit-deadbeef',
+                    'IndexBuilderMain explicit-index-command',
+                    'ServerMain explicit-server-command',
+                )
+                result = adapter.run(lambda endpoint: endpoint == stock.endpoint)
+
+            self.assertTrue(result.success)
+            qlever.assert_called_once()
+            stock.build_index.assert_called_once_with()
+            stock.start.assert_called_once_with()
+            stock.wait_until_ready.assert_called_once_with()
+            stock.stop.assert_called_once_with()
+
+    def test_qlever_system_adapter_rejects_changed_source_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            shared = os.path.join(directory, 'data', 'shared')
+            os.makedirs(shared)
+            with open(os.path.join(shared, 'dataset.nt'), 'wb') as stream:
+                stream.write(b'changed')
+            artifact = DatasetArtifact(
+                benchmark='bsbm', dataset='explore-1k', source_format='ntriples',
+                source_size_bytes=7, source_sha256='a' * 64,
+                representation='rdf/source',
+                files=(ArtifactFile(path='dataset.nt', size_bytes=7,
+                                    sha256='a' * 64),),
+            )
+            adapter = QLeverSystemAdapter(
+                artifact, os.path.join(directory, 'data'), directory,
+                'adfreiburg/qlever:commit-deadbeef', 'index', 'server',
+            )
+            self.assertFalse(adapter.prepare())
 
     def test_system_adapter_failed_lifecycle_is_terminal(self):
         tracker = LifecycleTracker(self._system_adapter_spec())
