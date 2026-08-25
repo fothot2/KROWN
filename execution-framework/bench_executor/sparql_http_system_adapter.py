@@ -112,7 +112,7 @@ class SparqlHttpSystemAdapter(abc.ABC):
             raise TypeError('execute must be callable')
 
         tracker = LifecycleTracker(self.specification)
-        started = False
+        start_attempted = False
         stop_attempted = False
         collect_attempted = False
 
@@ -126,6 +126,8 @@ class SparqlHttpSystemAdapter(abc.ABC):
         )
 
         for operation, action in operations:
+            if operation == LifecycleOperation.START:
+                start_attempted = True
             if operation == LifecycleOperation.STOP:
                 stop_attempted = True
             if operation == LifecycleOperation.COLLECT:
@@ -137,10 +139,8 @@ class SparqlHttpSystemAdapter(abc.ABC):
                 if not succeeded:
                     raise RuntimeError(f'{operation.value} returned false')
                 tracker.advance(operation)
-                if operation == LifecycleOperation.START:
-                    started = True
             except Exception as error:
-                if operation != LifecycleOperation.STOP and started:
+                if operation != LifecycleOperation.STOP and start_attempted:
                     stop_attempted = True
                     try:
                         self.stop()

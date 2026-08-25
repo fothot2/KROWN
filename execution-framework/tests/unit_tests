@@ -21,6 +21,7 @@ sys.path.append('../')
 from bench_executor.logger import Logger  # noqa: E402
 from bench_executor.container import Container  # noqa: E402
 from bench_executor.fuseki import Fuseki  # noqa: E402
+from bench_executor.fuseki_system_adapter import FusekiSystemAdapter  # noqa: E402
 from bench_executor.postgresql import PostgreSQL  # noqa: E402
 from bench_executor.mysql import MySQL  # noqa: E402
 from bench_executor.yarrrml import YARRRML  # noqa: E402
@@ -2239,6 +2240,79 @@ class UnitTests(unittest.TestCase):
             files=(ArtifactFile(path='dataset.nt', size_bytes=4, sha256='b' * 64),),
         )
         return self._FakeSparqlHttpSystemAdapter(specification, artifact, fail=fail)
+
+    def test_sparql_http_system_adapter_stops_after_start_failure(self):
+        adapter = self._fake_sparql_http_system_adapter(fail='start')
+
+        result = adapter.run(lambda endpoint: True)
+
+        self.assertFalse(result.success)
+        self.assertEqual(result.failed_operation, LifecycleOperation.START)
+        self.assertTrue(result.stop_attempted)
+        self.assertTrue(result.collect_attempted)
+        self.assertEqual(adapter.calls, ['prepare', 'start', 'stop', 'collect'])
+
+    def test_fuseki_system_adapter_reuses_stock_fuseki_lifecycle(self):
+        with tempfile.TemporaryDirectory() as directory:
+            shared = os.path.join(directory, 'data', 'shared')
+            config = os.path.join(directory, 'config')
+            log = os.path.join(directory, 'log')
+            os.makedirs(shared)
+            source = os.path.join(shared, 'dataset.nt')
+            with open(source, 'wb') as stream:
+                stream.write(b'<s> <p> <o> .\n')
+            artifact = DatasetArtifact(
+                benchmark='bsbm', dataset='explore-1k', source_format='ntriples',
+                source_size_bytes=os.path.getsize(source),
+                source_sha256=sha256_file(source), representation='rdf/source',
+                files=(ArtifactFile(
+                    path='dataset.nt', size_bytes=os.path.getsize(source),
+                    sha256=sha256_file(source),
+                ),),
+            )
+            stock = MagicMock()
+            stock.endpoint = 'http://localhost:3030/ds/sparql'
+            stock.wait_until_ready.return_value = True
+            stock.load.return_value = True
+            stock.stop.return_value = True
+
+            with patch(
+                    'bench_executor.fuseki_system_adapter.Fuseki',
+                    return_value=stock) as fuseki:
+                adapter = FusekiSystemAdapter(
+                    artifact, os.path.join(directory, 'data'), config, log,
+                )
+                result = adapter.run(lambda endpoint: endpoint == stock.endpoint)
+
+            self.assertTrue(result.success)
+            fuseki.assert_called_once_with(
+                os.path.join(directory, 'data'), config, log, False,
+            )
+            stock.wait_until_ready.assert_called_once_with()
+            stock.load.assert_called_once_with('dataset.nt')
+            stock.stop.assert_called_once_with()
+
+    def test_fuseki_system_adapter_rejects_changed_source_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            shared = os.path.join(directory, 'data', 'shared')
+            os.makedirs(shared)
+            source = os.path.join(shared, 'dataset.nt')
+            with open(source, 'wb') as stream:
+                stream.write(b'changed')
+            artifact = DatasetArtifact(
+                benchmark='bsbm', dataset='explore-1k', source_format='ntriples',
+                source_size_bytes=7, source_sha256='a' * 64,
+                representation='rdf/source',
+                files=(ArtifactFile(
+                    path='dataset.nt', size_bytes=7, sha256='a' * 64,
+                ),),
+            )
+            adapter = FusekiSystemAdapter(
+                artifact, os.path.join(directory, 'data'),
+                os.path.join(directory, 'config'), os.path.join(directory, 'log'),
+            )
+
+            self.assertFalse(adapter.prepare())
 
     def test_system_adapter_failed_lifecycle_is_terminal(self):
         tracker = LifecycleTracker(self._system_adapter_spec())

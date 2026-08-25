@@ -447,3 +447,7 @@ The system adapter lifecycle is separate from the experiment matrix. Server adap
 ### SPARQL HTTP server adapter foundation
 
 A SPARQL HTTP server adapter controls one query server that receives SPARQL queries over HTTP. `SparqlHttpSystemAdapter` applies the shared server lifecycle to `fuseki/default`, `virtuoso/default`, and `qlever/default`. Each system requires the `rdf/source` representation. Concrete adapters provide preparation, startup, readiness, shutdown, and collection operations. The shared foundation accepts the workload execution function, passes the endpoint to it, validates operation results, and performs best-effort shutdown and collection after a failure. It does not generate datasets or contain benchmark-specific logic.
+
+#### Fuseki lifecycle adapter
+
+`FusekiSystemAdapter` connects `fuseki/default` to the stock `Fuseki` class. It verifies the single N-Triples source file during preparation. It reuses stock startup, readiness, RDF loading, endpoint, shutdown, database cleanup, logging, and executor collection. It adds no second container or SPARQL client implementation.
