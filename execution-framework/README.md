@@ -451,3 +451,7 @@ A SPARQL HTTP server adapter controls one query server that receives SPARQL quer
 #### Fuseki lifecycle adapter
 
 `FusekiSystemAdapter` connects `fuseki/default` to the stock `Fuseki` class. It verifies the single N-Triples source file during preparation. It reuses stock startup, readiness, RDF loading, endpoint, shutdown, database cleanup, logging, and executor collection. It adds no second container or SPARQL client implementation.
+
+#### Virtuoso lifecycle adapter
+
+`VirtuosoSystemAdapter` connects `virtuoso/default` to the stock `Virtuoso` class. It verifies the N-Triples source file during preparation. It reuses stock database initialization, container readiness, parallel RDF loading, checkpoint restoration, endpoint, shutdown, database reset, logging, and executor collection. `loader_cores` selects the number of stock RDF loader threads. The adapter adds no second container or SPARQL client implementation.
