@@ -49,6 +49,9 @@ from bench_executor.rdflib_query_benchmark import _resolve_input_path, \
         RdfLibQueryBenchmark  # noqa: E402
 from bench_executor.dbbench_manifest_resource import DBBenchManifestResource  # noqa: E402
 from bench_executor.dbbench_query_resource import DBBenchQueryResource  # noqa: E402
+from bench_executor.experiment_matrix_contract import (  # noqa: E402
+        ArtifactFile, DatasetArtifact, ExperimentSpecification,
+        SystemConfiguration)
 from bench_executor.rdf_manifest_resource import RdfManifestResource  # noqa: E402
 from bench_executor.rdf_query_resource import (  # noqa: E402
         RdfQueryResource, _require_full_workload_opt_in)
@@ -1983,6 +1986,73 @@ class UnitTests(unittest.TestCase):
             path.write_text(json.dumps(source), encoding='utf-8')
             loaded = load_rdf_workload_manifest(path)
             self.assertEqual(loaded.to_dict(), source)
+
+
+    @staticmethod
+    def _matrix_artifact(representation='rdf/source'):
+        return DatasetArtifact(
+            benchmark='bsbm', dataset='explore-1k', source_format='ntriples',
+            source_size_bytes=10, source_sha256='a' * 64,
+            representation=representation,
+            files=(ArtifactFile('dataset.nt', 10, 'a' * 64),),
+            producer={'tool': 'external'},
+        )
+
+    def test_experiment_matrix_binds_logical_and_physical_identity(self):
+        artifact = self._matrix_artifact('hdt/default')
+        system = SystemConfiguration(
+            system='comunica', configuration='hdt', kind='file-backed',
+            representation='hdt/default', parameters={'client': 'node'},
+        )
+        experiment = ExperimentSpecification(
+            experiment_id='bsbm/explore-1k/comunica-hdt', benchmark='bsbm',
+            dataset='explore-1k', workload='explore-smoke',
+            dataset_artifact=artifact.artifact_id,
+            system_configuration=system.system_id,
+            execution_policy={'warmup_runs': 0, 'measured_runs': 1},
+        )
+        experiment.validate_bindings(artifact, system)
+        self.assertEqual(artifact.artifact_id, 'bsbm/explore-1k/hdt/default')
+        self.assertEqual(system.system_id, 'comunica/hdt')
+
+    def test_experiment_matrix_supports_required_system_identities(self):
+        cases = (
+            ('fuseki', 'default', 'server', 'rdf/source'),
+            ('virtuoso', 'default', 'server', 'rdf/source'),
+            ('qlever', 'default', 'server', 'rdf/source'),
+            ('comunica', 'hdt', 'file-backed', 'hdt/default'),
+            ('pycottas', 'default', 'file-backed', 'cottas/default'),
+            ('vortex-rdf', 'indexed', 'embedded', 'vortex-rdf/indexed'),
+        )
+        self.assertEqual(
+            [SystemConfiguration(system=a, configuration=b, kind=c,
+                                 representation=d).system_id
+             for a, b, c, d in cases],
+            ['fuseki/default', 'virtuoso/default', 'qlever/default',
+             'comunica/hdt', 'pycottas/default', 'vortex-rdf/indexed'],
+        )
+
+    def test_experiment_matrix_rejects_representation_mismatch(self):
+        artifact = self._matrix_artifact('hdt/default')
+        system = SystemConfiguration(
+            system='fuseki', configuration='default', kind='server',
+            representation='rdf/source',
+        )
+        experiment = ExperimentSpecification(
+            experiment_id='bsbm/mismatch', benchmark='bsbm',
+            dataset='explore-1k', workload='explore-smoke',
+            dataset_artifact=artifact.artifact_id,
+            system_configuration=system.system_id,
+            execution_policy={},
+        )
+        with self.assertRaisesRegex(ValueError, 'representations differ'):
+            experiment.validate_bindings(artifact, system)
+
+    def test_experiment_matrix_rejects_unsafe_artifact_files(self):
+        with self.assertRaisesRegex(ValueError, 'relative and contained'):
+            ArtifactFile('../dataset.hdt', 1, 'a' * 64)
+        with self.assertRaisesRegex(ValueError, 'SHA-256'):
+            ArtifactFile('dataset.hdt', 1, 'not-a-hash')
 
 
 if __name__ == '__main__':

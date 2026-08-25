@@ -435,3 +435,7 @@ Generate BSBM outside KROWN. Store the ignored dataset, official Explore CSV str
 #### BSBM Explore 1K semantic baseline
 
 The BSBM smoke scenario validates 11 measured query instances from the externally generated Explore stream. The committed baseline checks the 95,715,671-byte dataset hash, the generated manifest identity and hash, exact query IDs, statuses, result counts, result fingerprints, and coverage. The observed coverage is eight non-empty results, three empty results, and nine distinct fingerprints. Runtime fields remain outside semantic comparison.
+
+### Experiment matrix contracts
+
+The experiment matrix separates the logical workload from the query system and the physical dataset representation. `ExperimentSpecification` binds one benchmark, logical dataset, workload, dataset artifact, system configuration, and execution policy. `DatasetArtifact` records the source RDF identity and one physical representation such as `rdf/source`, `hdt/default`, `cottas/default`, or `vortex-rdf/<configuration>`. `SystemConfiguration` records a stable identity such as `fuseki/default`, `virtuoso/default`, `qlever/default`, `comunica/hdt`, `pycottas/default`, or `vortex-rdf/<configuration>`.
