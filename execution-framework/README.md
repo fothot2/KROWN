@@ -284,6 +284,10 @@ cd tests
 ```
 
 
+## RDF benchmark architecture
+
+See [RDF_BENCHMARK_ARCHITECTURE.md](RDF_BENCHMARK_ARCHITECTURE.md) for the enforced boundary between external generators, benchmark adapters, and KROWN.
+
 ## Standalone DBBench workflow
 
 KROWN delegates DBBench query discovery, manifest preparation, and RDFLib execution to the public `vortex-rdf-bench` interface. KROWN owns scenario orchestration, external dataset staging, artifact collection, and baseline validation. This keeps benchmark semantics in the benchmarks package and keeps the KROWN resources thin.

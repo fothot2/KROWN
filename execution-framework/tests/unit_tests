@@ -57,6 +57,7 @@ from bench_executor.dbbench_baseline_resource import (  # noqa: E402
 from bench_executor.rdf_baseline_resource import (  # noqa: E402
         RdfBaselineResource, validate_coverage)
 from bench_executor.external_rdf_dataset_resource import ExternalRdfDatasetResource  # noqa: E402
+from bench_executor.rdf_architecture_audit import audit_repository as audit_rdf_architecture  # noqa: E402
 
 LOG_DIR = os.path.join(os.path.dirname(__file__), '..', 'bench_executor',
                        'log')
@@ -1509,6 +1510,20 @@ class UnitTests(unittest.TestCase):
                 dataset='dbpedia', inventory_file='inventory.json',
                 benchmark_command='definitely-missing-vortex-rdf-bench',
             ))
+
+
+    def test_cross_benchmark_rdf_architecture_audit(self):
+        root = Path(__file__).resolve().parents[2]
+        benchmarks_root = Path('/users/u0182905/benchmarks')
+        report = audit_rdf_architecture(root, benchmarks_root)
+        self.assertEqual(report['schema'], 'krown-rdf-architecture-audit-v1')
+        self.assertEqual(report['benchmarks'], ['dbbench', 'bsbm'])
+        self.assertEqual(report['generic_resources'], [
+            'RdfManifestResource', 'ExternalRdfDatasetResource',
+            'RdfQueryResource', 'RdfBaselineResource',
+        ])
+        self.assertFalse(report['generation_inside_krown'])
+
 
     def test_bsbm_scenario_uses_generic_resources(self):
         path = Path(__file__).resolve().parents[2] / 'benchmark-integration/bsbm-smoke/metadata.json'
