@@ -48,6 +48,8 @@ from bench_executor.query_features import classify_query, \
         comparison_metadata  # noqa: E402
 from bench_executor.sparql_http_benchmark import _SparqlHttpAdapter, \
         SparqlHttpBenchmark  # noqa: E402
+from bench_executor.vortex_rdf_system_adapter import (  # noqa: E402
+        VortexRdfRuntimeConfiguration, VortexRdfSystemAdapter)
 from bench_executor.rdflib_query_benchmark import _resolve_input_path, \
         _resolve_output_path, _RdfLibAdapter, _WorkerRdfLibAdapter, \
         RdfLibQueryBenchmark  # noqa: E402
@@ -2489,6 +2491,21 @@ class UnitTests(unittest.TestCase):
                 'adfreiburg/qlever:commit-deadbeef', 'index', 'server',
             )
             self.assertFalse(adapter.prepare())
+
+
+    def test_vortex_rdf_runtime_configuration_is_replaceable(self):
+        runtime = VortexRdfRuntimeConfiguration()
+        self.assertEqual(
+            runtime.system_id,
+            'vortex-rdf/simple-dictionary-native-rdf-store',
+        )
+        self.assertEqual(runtime.storage_layout, 'native-rdf-store')
+        self.assertEqual(runtime.store_layout, 'cottas-native-ids')
+        updated = VortexRdfRuntimeConfiguration(
+            store_layout='native-rdf-store'
+        )
+        self.assertEqual(updated.store_layout, 'native-rdf-store')
+        self.assertEqual(updated.representation, runtime.representation)
 
     def test_system_adapter_failed_lifecycle_is_terminal(self):
         tracker = LifecycleTracker(self._system_adapter_spec())

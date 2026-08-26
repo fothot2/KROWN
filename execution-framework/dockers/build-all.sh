@@ -150,3 +150,9 @@ echo "*** Building COTTAS $COTTAS_VERSION ... ***"
 cd COTTAS
 docker build --build-arg PYCOTTAS_VERSION=$COTTAS_VERSION -t dtaikg/cottas:v$COTTAS_VERSION .
 cd ..
+
+# Vortex-RDF RDFLib Store
+VORTEX_RDF_VERSION='0.1.0'
+echo "*** Building Vortex-RDF $VORTEX_RDF_VERSION ... ***"
+VORTEX_RDF_SOURCE=${VORTEX_RDF_SOURCE:?Set VORTEX_RDF_SOURCE to the pinned checkout} \
+    ./VortexRDF/build.sh

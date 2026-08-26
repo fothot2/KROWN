@@ -491,3 +491,22 @@ It runs complete SPARQL queries through RDFLib over `pycottas.cottas_store.COTTA
 RDFLib supplies SPARQL processing. COTTAS supplies physical triple-pattern access.
 The later query-runner patch will reuse a persistent, killable worker for COTTAS and Vortex-RDF.
 KROWN mounts the verified `.cottas` artifact as read-only input.
+
+### Vortex-RDF 0.1.0 RDFLib Store container
+
+KROWN identifies the bootstrap system and representation as
+`vortex-rdf/simple-dictionary-native-rdf-store`.
+RDFLib 7.6.0 supplies SPARQL processing.
+Vortex-RDF supplies physical triple-pattern access through `VortexStore`.
+The system is embedded and uses `prepare`, `execute`, and `collect`.
+
+`VortexRdfRuntimeConfiguration` keeps all runtime names and version pins in one
+replaceable object. The current Python binding requires the Store layout alias
+`cottas-native-ids`. The physical representation and CLI storage layout remain
+`native-rdf-store`. Update only `store_layout` when the binding adopts its final
+name.
+
+The image build uses a clean local Vortex-RDF checkout at commit
+`0a0e51171aa42e79defdcd322bc1a328a93fcd11`. Set `VORTEX_RDF_SOURCE` before
+running the build script. KROWN verifies and consumes an existing `.vortex`
+artifact. It does not generate that representation.
