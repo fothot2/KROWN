@@ -526,3 +526,9 @@ KROWN identifies `oxigraph/memory` and `oxigraph/rocksdb` as SPARQL HTTP systems
 ### External RDF experiment declarations
 
 `rdf_experiment_manifest.py` loads versioned experiment intent from the benchmarks repository. It verifies representation receipts, shared logical source identity, registered systems, and representation compatibility. KROWN owns generic orchestration. Benchmark names, datasets, workloads, receipt selections, and system matrices remain outside the KROWN execution core.
+
+### Generic RDF experiment matrix execution
+
+`RdfExperimentMatrixResource` loads any external `rdf-experiment-declaration-v1`. It stages verified representation files, resolves registered system adapters, and writes one JSONL file per binding. It publishes one atomic summary and one compressed result archive. The resource contains no benchmark-specific dataset or workload rules. Workload preparation and semantic baseline selection remain external intent.
+
+Server adapter values that KROWN cannot derive, such as explicit index and server commands, must be supplied through `adapter_options`. KROWN does not guess runtime configuration. RDFLib-backed systems use the persistent killable worker.
