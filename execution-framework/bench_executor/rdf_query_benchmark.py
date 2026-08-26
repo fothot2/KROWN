@@ -140,13 +140,28 @@ def _load_query_manifest(path: str) -> _QueryManifest:
         query_id = raw_query.get('query_id')
         if query_id in query_ids:
             raise ValueError(f'Duplicate query_id: {query_id}')
+        query_text = raw_query.get('query')
+        declared_query_sha256 = raw_query.get('query_sha256')
+        if declared_query_sha256 is not None:
+            if (not isinstance(declared_query_sha256, str)
+                    or len(declared_query_sha256) != 64
+                    or any(character not in '0123456789abcdef'
+                           for character in declared_query_sha256)):
+                raise ValueError(
+                    f'query {index} query_sha256 must be a lowercase SHA-256'
+                )
+            calculated_query_sha256 = sha256_text(query_text)
+            if declared_query_sha256 != calculated_query_sha256:
+                raise ValueError(
+                    f'query {index} query_sha256 differs from query text'
+                )
         metadata = {
             key: value for key, value in raw_query.items()
-            if key not in {'query_id', 'query'}
+            if key not in {'query_id', 'query', 'query_sha256'}
         }
         query = _QuerySpec(
             query_id=query_id,
-            query=raw_query.get('query'),
+            query=query_text,
             metadata=metadata,
         )
         query_ids.add(query.query_id)
