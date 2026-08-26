@@ -143,3 +143,10 @@ cd ComunicaHDT
 docker build --build-arg COMUNICA_HDT_VERSION=$COMUNICA_HDT_VERSION \
     -t dtaikg/comunica-hdt:v$COMUNICA_HDT_VERSION .
 cd ..
+
+# COTTAS
+COTTAS_VERSION='1.1.0'
+echo "*** Building COTTAS $COTTAS_VERSION ... ***"
+cd COTTAS
+docker build --build-arg PYCOTTAS_VERSION=$COTTAS_VERSION -t dtaikg/cottas:v$COTTAS_VERSION .
+cd ..

@@ -481,3 +481,13 @@ KROWN pins `virtuoso/default` to the official Virtuoso Open Source 7.2.17 generi
 ### Comunica HDT 5.0.1 container
 
 KROWN pins `comunica/hdt` to `dtaikg/comunica-hdt:v5.0.1`. The file-backed adapter requires `hdt/default`. It uses `prepare`, `execute`, and `collect`; it does not emulate server startup. The image uses Node.js 24.19.0 and `@comunica/query-sparql-hdt` 5.0.1. Execute local files with the explicit `hdt@/data/dataset.hdt` source and SPARQL JSON output.
+
+### Standalone COTTAS 1.1.0 container
+
+KROWN pins `pycottas/default` to `dtaikg/cottas:v1.1.0`.
+The file-backed adapter requires `cottas/default`.
+It uses `prepare`, `execute`, and `collect`.
+It runs complete SPARQL queries through RDFLib over `pycottas.cottas_store.COTTASStore`.
+RDFLib supplies SPARQL processing. COTTAS supplies physical triple-pattern access.
+The later query-runner patch will reuse a persistent, killable worker for COTTAS and Vortex-RDF.
+KROWN mounts the verified `.cottas` artifact as read-only input.
