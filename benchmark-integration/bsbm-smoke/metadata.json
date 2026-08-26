@@ -1,18 +1,18 @@
 {
   "@id": "https://w3id.org/krown/benchmark-integration/bsbm-smoke",
-  "name": "BSBM generic adapter smoke execution",
-  "description": "Prepare BSBM through its adapter and execute it through generic RDF resources.",
+  "name": "BSBM Explore 1K RDF experiment matrix",
+  "description": "Prepare the external BSBM smoke workload and execute its benchmark-owned experiment declaration through the generic RDF matrix resource.",
   "steps": [
     {
       "@id": "https://w3id.org/krown/benchmark-integration/bsbm-smoke/prepare",
-      "name": "Prepare BSBM manifest",
+      "name": "Prepare BSBM smoke manifest",
       "resource": "RdfManifestResource",
       "command": "execute",
       "parameters": {
         "benchmark": "bsbm",
         "output_file": "manifests/bsbm.json",
         "workload": "bsbm-explore-smoke",
-        "dataset": "bsbm-local",
+        "dataset": "explore-1k",
         "benchmark_root": "/users/u0182905/benchmarks",
         "input_env": "KROWN_BSBM_QUERY_STREAM",
         "input_option": "--query-stream",
@@ -26,45 +26,22 @@
       }
     },
     {
-      "@id": "https://w3id.org/krown/benchmark-integration/bsbm-smoke/stage",
-      "name": "Stage BSBM dataset",
-      "resource": "ExternalRdfDatasetResource",
+      "@id": "https://w3id.org/krown/benchmark-integration/bsbm-smoke/execute-matrix",
+      "name": "Execute BSBM RDF experiment matrix",
+      "resource": "RdfExperimentMatrixResource",
       "command": "execute",
       "parameters": {
-        "source_file_env": "KROWN_RDF_DATASET_FILE",
-        "destination_file": "bsbm/dataset.nt",
-        "mode": "hardlink"
-      }
-    },
-    {
-      "@id": "https://w3id.org/krown/benchmark-integration/bsbm-smoke/run",
-      "name": "Execute BSBM through generic RDF resource",
-      "resource": "RdfQueryResource",
-      "command": "execute",
-      "parameters": {
-        "benchmark": "bsbm",
-        "benchmark_root": "/users/u0182905/benchmarks",
+        "declaration_file": "/users/u0182905/benchmarks/BSBM/experiments/explore-1k-smoke.json",
         "manifest_file": "manifests/bsbm.json",
-        "dataset_file": "bsbm/dataset.nt",
-        "results_file": "raw/bsbm.jsonl",
-        "experiment_id": "bsbm-generic-smoke-rdflib",
-        "system": "rdflib",
-        "warmup_runs": 0,
-        "measured_runs": 1,
-        "timeout_s": 60.0,
-        "large_workload_env": "KROWN_RDF_ALLOW_LARGE_WORKLOAD"
-      }
-    },
-    {
-      "@id": "https://w3id.org/krown/benchmark-integration/bsbm-smoke/validate",
-      "name": "Validate BSBM Explore 1K semantic baseline",
-      "resource": "RdfBaselineResource",
-      "command": "execute",
-      "parameters": {
-        "baseline_file": "bsbm/explore-1k-baseline.json",
-        "manifest_file": "manifests/bsbm.json",
-        "dataset_file": "bsbm/dataset.nt",
-        "results_input_file": "raw/bsbm.jsonl"
+        "results_file": "raw/bsbm-matrix-summary.json",
+        "output_file": "raw/bsbm-matrix-results.tar.gz",
+        "adapter_option_env": {
+          "qlever/default": {
+            "image": "KROWN_QLEVER_IMAGE",
+            "index_command": "KROWN_QLEVER_INDEX_COMMAND",
+            "server_command": "KROWN_QLEVER_SERVER_COMMAND"
+          }
+        }
       }
     }
   ]

@@ -152,6 +152,35 @@ def _constructor_arguments(
     return arguments
 
 
+
+def _environment_adapter_options(
+        declarations: Mapping[str, Mapping[str, str]] | None,
+        environment: Mapping[str, str] | None = None) -> dict[str, dict[str, str]]:
+    """Resolve explicit adapter options from named environment variables."""
+    if declarations is None:
+        return {}
+    if not isinstance(declarations, Mapping):
+        raise TypeError("adapter_option_env must be an object")
+    source = os.environ if environment is None else environment
+    resolved: dict[str, dict[str, str]] = {}
+    for system_id, options in declarations.items():
+        if not isinstance(system_id, str) or not system_id:
+            raise ValueError("adapter_option_env system ID must be non-empty")
+        if not isinstance(options, Mapping) or not options:
+            raise ValueError(f"adapter_option_env for {system_id} must be a non-empty object")
+        values = {}
+        for option, variable in options.items():
+            if not isinstance(option, str) or not option:
+                raise ValueError("adapter option name must be non-empty")
+            if not isinstance(variable, str) or not variable:
+                raise ValueError("adapter environment variable name must be non-empty")
+            value = source.get(variable)
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"Environment variable is not set: {variable}")
+            values[option] = value
+        resolved[system_id] = values
+    return resolved
+
 class _ComunicaQueryAdapter(_RdfQueryAdapter):
     """Execute complete SPARQL queries through one file-backed command adapter."""
     def __init__(self, adapter, artifact: Path, timeout_s: float):
@@ -259,7 +288,8 @@ class RdfExperimentMatrixResource:
             manifest_file: str,
             results_file: str,
             output_file: str,
-            adapter_options: Mapping[str, Mapping[str, Any]] | None = None) -> bool:
+            adapter_options: Mapping[str, Mapping[str, Any]] | None = None,
+            adapter_option_env: Mapping[str, Mapping[str, str]] | None = None) -> bool:
         """Execute all declaration bindings and publish summary plus archive."""
         summary_temporary = archive_temporary = None
         run_directory = None
@@ -274,6 +304,11 @@ class RdfExperimentMatrixResource:
                 item.system_id: item for item in system_adapter_specifications()
             }
             options = {} if adapter_options is None else dict(adapter_options)
+            environment_options = _environment_adapter_options(adapter_option_env)
+            for system_id, values in environment_options.items():
+                merged = dict(options.get(system_id, {}))
+                merged.update(values)
+                options[system_id] = merged
             unknown = sorted(set(options).difference(specifications))
             if unknown:
                 raise ValueError("adapter_options contains unknown systems: " + ", ".join(unknown))
