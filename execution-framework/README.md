@@ -477,3 +477,7 @@ KROWN pins `fuseki/default` to Apache Jena Fuseki 6.2.0. The Docker build uses J
 ### Virtuoso 7.2.17 container
 
 KROWN pins `virtuoso/default` to the official Virtuoso Open Source 7.2.17 generic Linux archive. The Docker build verifies SHA-256 before extraction. The image preserves the existing `/database`, `/usr/share/proj`, `VIRT_*`, SQL, and SPARQL contracts. Docker Compose is an optional manual development path.
+
+### Comunica HDT 5.0.1 container
+
+KROWN pins `comunica/hdt` to `dtaikg/comunica-hdt:v5.0.1`. The file-backed adapter requires `hdt/default`. It uses `prepare`, `execute`, and `collect`; it does not emulate server startup. The image uses Node.js 24.19.0 and `@comunica/query-sparql-hdt` 5.0.1. Execute local files with the explicit `hdt@/data/dataset.hdt` source and SPARQL JSON output.

@@ -2566,6 +2566,23 @@ class UnitTests(unittest.TestCase):
 
 
 
+    def test_comunica_hdt_adapter_uses_verified_file_backed_contract(self):
+        from bench_executor.comunica_hdt_system_adapter import ComunicaHdtSystemAdapter
+        adapter = ComunicaHdtSystemAdapter()
+        self.assertEqual(adapter.system_id, 'comunica/hdt')
+        self.assertEqual(adapter.representation, 'hdt/default')
+        self.assertEqual(adapter.lifecycle, ('prepare', 'execute', 'collect'))
+        command = adapter.query_command(container_artifact='/data/dataset.hdt', query='SELECT * WHERE { ?s ?p ?o } LIMIT 1')
+        self.assertEqual(command[:2], ['comunica-sparql-hdt', 'hdt@/data/dataset.hdt'])
+        self.assertEqual(command[-2:], ['-t', 'application/sparql-results+json'])
+
+    def test_comunica_hdt_docker_context_is_pinned(self):
+        root = Path(__file__).resolve().parents[1]
+        dockerfile = (root / 'dockers' / 'ComunicaHDT' / 'Dockerfile').read_text()
+        package = json.loads((root / 'dockers' / 'ComunicaHDT' / 'package.json').read_text())
+        self.assertIn('node:${NODE_VERSION}-bookworm-slim', dockerfile)
+        self.assertEqual(package['dependencies']['@comunica/query-sparql-hdt'], '5.0.1')
+
 if __name__ == '__main__':
     # SELinux causes weird permission denied issues, warn users
     try:

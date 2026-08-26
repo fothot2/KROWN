@@ -1,0 +1,11 @@
+services:
+  comunica-hdt:
+    image: dtaikg/comunica-hdt:v5.0.1
+    build:
+      context: .
+      args:
+        NODE_VERSION: 24.19.0
+        COMUNICA_HDT_VERSION: 5.0.1
+    network_mode: none
+    volumes:
+      - ./data:/data:ro
