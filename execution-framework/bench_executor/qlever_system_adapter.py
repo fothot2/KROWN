@@ -32,8 +32,10 @@ class QLeverSystemAdapter(SparqlHttpSystemAdapter):
     """Apply the generic lifecycle to a pinned QLever container."""
 
     def __init__(self, artifact: DatasetArtifact, data_path: str,
-                 directory: str, image: str, index_command: str,
-                 server_command: str, verbose: bool = False, port: int = 7001):
+                 directory: str, image: str = 'kgconstruct/qlever:v0.6.0',
+                 index_command: str | None = None,
+                 server_command: str | None = None, verbose: bool = False,
+                 port: int = 7001):
         super().__init__(_qlever_specification(), artifact)
         if artifact.source_format != 'ntriples':
             raise ValueError('QLever rdf/source artifact must use ntriples')
@@ -42,6 +44,19 @@ class QLeverSystemAdapter(SparqlHttpSystemAdapter):
         self._data_path = Path(data_path).resolve()
         self._directory = Path(directory).resolve()
         self._rdf_file = artifact.files[0]
+        container_source = f'/data/shared/{self._rdf_file.path}'
+        index_basename = '/data/qlever-index/bsbm-explore-1k'
+        if index_command is None:
+            index_command = (
+                'mkdir -p /data/qlever-index && '
+                f'/qlever/qlever-index --index-basename {index_basename} '
+                f'--kg-input-file {container_source} --file-format nt'
+            )
+        if server_command is None:
+            server_command = (
+                f'/qlever/qlever-server --index-basename {index_basename} '
+                f'--port {port}'
+            )
         self._qlever = QLever(
             str(self._data_path), str(self._directory), verbose,
             image, index_command, server_command, port,

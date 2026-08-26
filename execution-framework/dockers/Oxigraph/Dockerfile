@@ -1,5 +1,9 @@
 FROM rust:1.96.1-bookworm AS builder
 ARG OXIGRAPH_VERSION=0.5.9
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        clang cmake libclang-dev pkg-config \
+    && rm -rf /var/lib/apt/lists/*
 RUN cargo install --locked --version "${OXIGRAPH_VERSION}" oxigraph-cli
 
 FROM debian:bookworm-slim

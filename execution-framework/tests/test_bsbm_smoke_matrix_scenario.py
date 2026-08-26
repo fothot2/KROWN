@@ -20,11 +20,7 @@ class BsbmSmokeMatrixScenarioTests(unittest.TestCase):
   text=json.dumps(self.metadata,sort_keys=True)
   self.assertNotIn('representations',text);self.assertNotIn('bindings',text)
   self.assertNotIn('RdfQueryResource',text);self.assertNotIn('RdfBaselineResource',text)
- def test_qlever_runtime_values_are_environment_driven(self):
-  mapping=self.metadata['steps'][2]['parameters']['adapter_option_env']
-  environment={'KROWN_QLEVER_IMAGE':'kgconstruct/qlever:v0.6.0','KROWN_QLEVER_INDEX_COMMAND':'index explicit','KROWN_QLEVER_SERVER_COMMAND':'server explicit'}
-  self.assertEqual(_environment_adapter_options(mapping,environment)['qlever/default'],{'image':'kgconstruct/qlever:v0.6.0','index_command':'index explicit','server_command':'server explicit'})
- def test_missing_runtime_environment_is_rejected(self):
-  mapping=self.metadata['steps'][2]['parameters']['adapter_option_env']
-  with self.assertRaisesRegex(ValueError,'KROWN_QLEVER_IMAGE'):_environment_adapter_options(mapping,{})
+ def test_qlever_uses_pinned_runtime_defaults(self):
+  for step in self.metadata['steps'][1:]:
+   self.assertNotIn('adapter_option_env',step['parameters'])
 if __name__=='__main__':unittest.main()

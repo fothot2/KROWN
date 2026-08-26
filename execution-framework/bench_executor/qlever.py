@@ -42,7 +42,7 @@ class QLever:
     def build_index(self) -> bool:
         indexer = Container(
             self._image, 'qlever_index', self._logger,
-            volumes=[f'{self._data_path}:/qlever'],
+            volumes=[f'{self._data_path}:/data'],
         )
         return indexer.run_and_wait_for_exit(self._index_command)
 
@@ -50,7 +50,7 @@ class QLever:
         self._server = Container(
             self._image, 'qlever_server', self._logger,
             ports={str(self._port): str(self._port)},
-            volumes=[f'{self._data_path}:/qlever'],
+            volumes=[f'{self._data_path}:/data'],
         )
         return self._server.run(self._server_command)
 

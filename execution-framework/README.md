@@ -546,3 +546,13 @@ The executor repeats the preflight immediately before staging and running the
 matrix. This reduces the interval between port and runtime checks and system
 startup. A preflight does not pull or build images, start containers, execute
 queries, or modify benchmark artifacts.
+
+### Patch 56E runtime defaults
+
+The standard QLever 0.6.0 adapter derives direct `qlever-index` and
+`qlever-server` commands from the verified staged RDF artifact. Explicit adapter
+options remain supported. The local QLever image uses `/data` as its working
+directory and mount point, which satisfies the upstream entrypoint contract.
+
+The Oxigraph 0.5.9 builder installs the Clang and CMake toolchain required by
+the RocksDB bindings. Build the image explicitly before matrix preflight.

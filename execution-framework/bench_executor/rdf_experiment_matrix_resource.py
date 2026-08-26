@@ -157,6 +157,7 @@ def _runtime_preflight(
         elif system_id == "virtuoso/default":
             images.add("kgconstruct/virtuoso:v7.2.17"); ports.update((1111, 8890))
         elif system_id == "qlever/default":
+            images.add(str(supplied.get("image", "kgconstruct/qlever:v0.6.0")))
             ports.add(int(supplied.get("port", 7001)))
         elif system_id.startswith("oxigraph/"):
             images.add("dtaikg/oxigraph:0.5.9"); ports.add(int(supplied.get("port", 7878)))

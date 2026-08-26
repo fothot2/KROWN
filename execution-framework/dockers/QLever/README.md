@@ -1,20 +1,14 @@
 # QLever 0.6.0
 
-This context pins the official QLever 0.6.0 image by its multi-platform digest.
-The KROWN executor uses `kgconstruct/qlever:v0.6.0` through its stock Docker abstraction.
+This context pins the official QLever 0.6.0 image by digest. The local image is
+`kgconstruct/qlever:v0.6.0`. It sets `WORKDIR /data`, as required by the upstream
+entrypoint.
 
-The upstream image provides the `qlever` command through `/qlever/docker-entrypoint.sh`.
-It does not expose `IndexBuilderMain` or `ServerMain` in `PATH`.
-Therefore, experiment configuration must pass explicit QLever CLI commands to
-`QLeverSystemAdapter`. KROWN does not guess index names, input files, memory limits,
-or server options.
+KROWN mounts the scenario data directory at `/data`. The standard adapter derives
+commands from the verified staged N-Triples artifact:
 
-Build the local image:
+- `/qlever/qlever-index` builds `/data/qlever-index/bsbm-explore-1k`.
+- `/qlever/qlever-server` serves that index on port 7001.
 
-```sh
-docker build -t kgconstruct/qlever:v0.6.0 .
-```
-
-The tracked `docker-compose.yaml` is a manual development template. Set
-`QLEVER_COMMAND` to one complete command before you start it. The KROWN executor
-does not use Compose.
+Explicit image, index command, and server command options still override these
+defaults. KROWN does not use Docker Compose for experiment execution.

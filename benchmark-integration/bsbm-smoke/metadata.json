@@ -33,14 +33,7 @@
       "parameters": {
         "declaration_file": "/users/u0182905/benchmarks/BSBM/experiments/explore-1k-smoke.json",
         "manifest_file": "manifests/bsbm.json",
-        "output_file": "raw/bsbm-matrix-preflight.json",
-        "adapter_option_env": {
-          "qlever/default": {
-            "image": "KROWN_QLEVER_IMAGE",
-            "index_command": "KROWN_QLEVER_INDEX_COMMAND",
-            "server_command": "KROWN_QLEVER_SERVER_COMMAND"
-          }
-        }
+        "output_file": "raw/bsbm-matrix-preflight.json"
       }
     },
     {
@@ -52,14 +45,7 @@
         "declaration_file": "/users/u0182905/benchmarks/BSBM/experiments/explore-1k-smoke.json",
         "manifest_file": "manifests/bsbm.json",
         "results_file": "raw/bsbm-matrix-summary.json",
-        "output_file": "raw/bsbm-matrix-results.tar.gz",
-        "adapter_option_env": {
-          "qlever/default": {
-            "image": "KROWN_QLEVER_IMAGE",
-            "index_command": "KROWN_QLEVER_INDEX_COMMAND",
-            "server_command": "KROWN_QLEVER_SERVER_COMMAND"
-          }
-        }
+        "output_file": "raw/bsbm-matrix-results.tar.gz"
       }
     }
   ]

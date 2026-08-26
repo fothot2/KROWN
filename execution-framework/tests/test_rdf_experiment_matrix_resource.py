@@ -86,6 +86,18 @@ class RdfExperimentMatrixResourceTests(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError,'missing local Docker images'):
                     _runtime_preflight(declaration,manifest)
 
+    def test_qlever_preflight_uses_local_default_image(self):
+        experiment=SimpleNamespace(experiment_id='sample/run/qlever',system_configuration='qlever/default')
+        artifact=DatasetArtifact('sample','tiny','ntriples',1,'a'*64,'rdf/source',(ArtifactFile('x.nt',1,'b'*64),))
+        configuration=SystemConfiguration('qlever','default','server','rdf/source')
+        specification=SimpleNamespace(system_id='qlever/default',configuration=configuration,adapter='bench_executor.qlever_system_adapter:QLeverSystemAdapter',parameters={})
+        with tempfile.TemporaryDirectory() as directory:
+            declaration=Path(directory)/'declaration.json'; manifest=Path(directory)/'manifest.json'; declaration.write_text('{}'); manifest.write_text('{}')
+            daemon=SimpleNamespace(returncode=0,stdout='"29.1.3"',stderr='')
+            with patch('bench_executor.rdf_experiment_matrix_resource.load_rdf_experiment_declaration',return_value=((experiment,),{'rdf/source':artifact})), patch('bench_executor.rdf_experiment_matrix_resource.system_adapter_specifications',return_value=(specification,)), patch('bench_executor.rdf_experiment_matrix_resource.shutil.which',return_value='/usr/bin/docker'), patch('bench_executor.rdf_experiment_matrix_resource.subprocess.run',return_value=daemon), patch('bench_executor.rdf_experiment_matrix_resource._docker_image_available',return_value=True), patch('bench_executor.rdf_experiment_matrix_resource._port_available',return_value=True):
+                report=_runtime_preflight(declaration,manifest)
+        self.assertIn('kgconstruct/qlever:v0.6.0',report['required_images'])
+
 
 if __name__ == '__main__':
     unittest.main()
