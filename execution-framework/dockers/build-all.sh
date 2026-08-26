@@ -163,3 +163,10 @@ VORTEX_RDF_VERSION='0.1.0'
 echo "*** Building Vortex-RDF $VORTEX_RDF_VERSION ... ***"
 VORTEX_RDF_SOURCE=${VORTEX_RDF_SOURCE:?Set VORTEX_RDF_SOURCE to the pinned checkout} \
     ./VortexRDF/build.sh
+
+# Oxigraph
+OXIGRAPH_VERSION='0.5.9'
+echo "*** Building Oxigraph ${OXIGRAPH_VERSION} ... ***"
+cd Oxigraph
+docker build --build-arg OXIGRAPH_VERSION="${OXIGRAPH_VERSION}" -t "dtaikg/oxigraph:${OXIGRAPH_VERSION}" .
+cd ..

@@ -21,6 +21,8 @@ _SYSTEM_ADAPTERS = {
     'fuseki/default': 'bench_executor.fuseki_system_adapter:FusekiSystemAdapter',
     'virtuoso/default': 'bench_executor.virtuoso_system_adapter:VirtuosoSystemAdapter',
     'qlever/default': 'bench_executor.qlever_system_adapter:QLeverSystemAdapter',
+    'oxigraph/memory': 'bench_executor.oxigraph_system_adapter:OxigraphSystemAdapter',
+    'oxigraph/rocksdb': 'bench_executor.oxigraph_system_adapter:OxigraphSystemAdapter',
 }
 
 

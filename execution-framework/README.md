@@ -518,3 +518,7 @@ KROWN identifies this embedded baseline as `rdflib/default` over `rdf/source`.
 The persistent worker parses the N-Triples source once during startup.
 Parsing stays outside each query measurement. Each measurement includes
 `Graph.query()` and full result materialization.
+
+### Oxigraph 0.5.9 server configurations
+
+KROWN identifies `oxigraph/memory` and `oxigraph/rocksdb` as SPARQL HTTP systems over `rdf/source`. The memory configuration omits persistent storage. The RocksDB configuration uses a private persistent directory. Both configurations load the verified N-Triples source before query timing.

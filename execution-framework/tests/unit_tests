@@ -2145,7 +2145,8 @@ class UnitTests(unittest.TestCase):
 
         self.assertEqual(
             [item.system_id for item in specifications],
-            ['fuseki/default', 'virtuoso/default', 'qlever/default'],
+            ['fuseki/default', 'virtuoso/default', 'qlever/default',
+             'oxigraph/memory', 'oxigraph/rocksdb'],
         )
         self.assertTrue(all(
             item.configuration.kind == 'server'
