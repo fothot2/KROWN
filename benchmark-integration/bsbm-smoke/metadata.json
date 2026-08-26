@@ -26,6 +26,24 @@
       }
     },
     {
+      "@id": "https://w3id.org/krown/benchmark-integration/bsbm-smoke/preflight-matrix",
+      "name": "Preflight BSBM RDF experiment matrix",
+      "resource": "RdfExperimentMatrixResource",
+      "command": "preflight",
+      "parameters": {
+        "declaration_file": "/users/u0182905/benchmarks/BSBM/experiments/explore-1k-smoke.json",
+        "manifest_file": "manifests/bsbm.json",
+        "output_file": "raw/bsbm-matrix-preflight.json",
+        "adapter_option_env": {
+          "qlever/default": {
+            "image": "KROWN_QLEVER_IMAGE",
+            "index_command": "KROWN_QLEVER_INDEX_COMMAND",
+            "server_command": "KROWN_QLEVER_SERVER_COMMAND"
+          }
+        }
+      }
+    },
+    {
       "@id": "https://w3id.org/krown/benchmark-integration/bsbm-smoke/execute-matrix",
       "name": "Execute BSBM RDF experiment matrix",
       "resource": "RdfExperimentMatrixResource",

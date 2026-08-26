@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import hashlib
 import inspect
+import importlib.util
 import json
 import os
 import shutil
+import socket
 import subprocess
 import tarfile
 import tempfile
@@ -39,6 +41,157 @@ from bench_executor.standalone_benchmark import (
 )
 
 SUMMARY_SCHEMA = "rdf-experiment-matrix-summary-v1"
+
+PREFLIGHT_SCHEMA = "rdf-experiment-matrix-preflight-v1"
+_PLACEHOLDER_MARKERS = ("<", ">", "todo", "replace-me", "validated ")
+_ENGINE_MODULES = {
+    "default": "rdflib",
+    "cottas": "pycottas.cottas_store",
+    "vortex": "vortex_rdflib",
+}
+
+
+def _require_concrete_runtime_value(value: Any, field: str) -> str:
+    """Return one explicit value and reject shell-style placeholders."""
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{field} must be a non-empty string")
+    normalized = value.strip()
+    lowered = normalized.lower()
+    if any(marker in lowered for marker in _PLACEHOLDER_MARKERS):
+        raise ValueError(f"{field} contains a placeholder value")
+    return normalized
+
+
+def _docker_image_available(image: str) -> bool:
+    """Check local image metadata without pulling or starting a container."""
+    result = subprocess.run(
+        ["docker", "image", "inspect", image],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    return result.returncode == 0
+
+
+def _port_available(port: int) -> bool:
+    """Check whether one loopback TCP port can be bound now."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            listener.bind(("127.0.0.1", port))
+        except OSError:
+            return False
+    return True
+
+
+def _runtime_preflight(
+        declaration_path: Path,
+        manifest_path: Path,
+        adapter_options: Mapping[str, Mapping[str, Any]] | None = None,
+        adapter_option_env: Mapping[str, Mapping[str, str]] | None = None,
+        environment: Mapping[str, str] | None = None) -> dict[str, Any]:
+    """Build and validate a complete plan without starting query systems."""
+    if not declaration_path.is_file():
+        raise FileNotFoundError(f"experiment declaration is missing: {declaration_path}")
+    if not manifest_path.is_file():
+        raise FileNotFoundError(f"query manifest is missing: {manifest_path}")
+    experiments, artifacts = load_rdf_experiment_declaration(declaration_path)
+    specifications = {item.system_id: item for item in system_adapter_specifications()}
+    options = {} if adapter_options is None else {
+        key: dict(value) for key, value in adapter_options.items()
+    }
+    environment_options = _environment_adapter_options(
+        adapter_option_env, environment
+    )
+    for system_id, values in environment_options.items():
+        merged = dict(options.get(system_id, {}))
+        merged.update(values)
+        options[system_id] = merged
+    unknown = sorted(set(options).difference(specifications))
+    if unknown:
+        raise ValueError("adapter_options contains unknown systems: " + ", ".join(unknown))
+
+    docker = shutil.which("docker")
+    if docker is None:
+        raise RuntimeError("docker executable is not available")
+    daemon = subprocess.run(
+        [docker, "info", "--format", "{{json .ServerVersion}}"],
+        text=True, capture_output=True, check=False,
+    )
+    if daemon.returncode != 0:
+        raise RuntimeError("Docker daemon is not available")
+
+    images: set[str] = set()
+    ports: set[int] = set()
+    modules: set[str] = set()
+    plan = []
+    for experiment in experiments:
+        system_id = experiment.system_configuration
+        specification = specifications[system_id]
+        module_name, separator, class_name = specification.adapter.partition(":")
+        if not separator:
+            raise ValueError(f"invalid adapter path: {specification.adapter}")
+        module = __import__(module_name, fromlist=[class_name])
+        adapter_class = getattr(module, class_name)
+        supplied = dict(options.get(system_id, {}))
+        for name, value in list(supplied.items()):
+            if isinstance(value, str):
+                supplied[name] = _require_concrete_runtime_value(
+                    value, f"{system_id}.{name}"
+                )
+        configuration = specification.configuration
+        artifact = artifacts[configuration.representation]
+        if configuration.kind == "server":
+            _constructor_arguments(
+                adapter_class, artifact, "/preflight/data", "/preflight/config",
+                "/preflight/log", False, configuration, supplied,
+            )
+        engine = specification.parameters.get("engine")
+        if engine in _ENGINE_MODULES:
+            modules.add(_ENGINE_MODULES[engine])
+        image = supplied.get("image") or configuration.parameters.get("image")
+        if isinstance(image, str):
+            images.add(_require_concrete_runtime_value(image, f"{system_id}.image"))
+        if system_id == "fuseki/default":
+            images.add("kgconstruct/fuseki:v6.2.0"); ports.add(3030)
+        elif system_id == "virtuoso/default":
+            images.add("kgconstruct/virtuoso:v7.2.17"); ports.update((1111, 8890))
+        elif system_id == "qlever/default":
+            ports.add(int(supplied.get("port", 7001)))
+        elif system_id.startswith("oxigraph/"):
+            images.add("dtaikg/oxigraph:0.5.9"); ports.add(int(supplied.get("port", 7878)))
+        elif system_id == "comunica/hdt":
+            images.add(str(configuration.parameters["image"]))
+        plan.append({
+            "experiment_id": experiment.experiment_id,
+            "system": system_id,
+            "kind": configuration.kind,
+            "representation": configuration.representation,
+            "artifact_files": [item.path for item in artifact.files],
+            "adapter": specification.adapter,
+        })
+
+    missing_modules = sorted(
+        name for name in modules if importlib.util.find_spec(name) is None
+    )
+    if missing_modules:
+        raise RuntimeError("missing Python runtime modules: " + ", ".join(missing_modules))
+    missing_images = sorted(image for image in images if not _docker_image_available(image))
+    if missing_images:
+        raise RuntimeError("missing local Docker images: " + ", ".join(missing_images))
+    busy_ports = sorted(port for port in ports if not _port_available(port))
+    if busy_ports:
+        raise RuntimeError("required TCP ports are busy: " + ", ".join(map(str, busy_ports)))
+    return {
+        "schema": PREFLIGHT_SCHEMA,
+        "declaration_sha256": _sha256(declaration_path),
+        "manifest_sha256": _sha256(manifest_path),
+        "docker_server_version": json.loads(daemon.stdout),
+        "required_images": sorted(images),
+        "required_python_modules": sorted(modules),
+        "required_ports": sorted(ports),
+        "experiments": plan,
+    }
 
 
 def _sha256(path: Path) -> str:
@@ -282,6 +435,41 @@ class RdfExperimentMatrixResource:
     def root_mount_directory(self) -> str:
         return __name__.lower()
 
+    def preflight(
+            self,
+            declaration_file: str,
+            manifest_file: str,
+            output_file: str,
+            adapter_options: Mapping[str, Mapping[str, Any]] | None = None,
+            adapter_option_env: Mapping[str, Mapping[str, str]] | None = None) -> bool:
+        """Publish a dry runtime plan without starting any query system."""
+        temporary = None
+        try:
+            declaration_path = Path(declaration_file).expanduser().resolve()
+            manifest_path = input_file(str(self._shared), manifest_file)
+            report = _runtime_preflight(
+                declaration_path, manifest_path, adapter_options,
+                adapter_option_env,
+            )
+            output_path = resolve_shared_path(
+                str(self._shared), output_file, "Output"
+            )
+            temporary = temporary_output(output_path)
+            _atomic_json(temporary, report)
+            commit_output(temporary, output_path)
+            temporary = None
+            self._logger.info(
+                f"Preflight validated {len(report['experiments'])} RDF bindings"
+            )
+            return True
+        except Exception as error:
+            self._logger.error(
+                f"RDF experiment preflight failed: {type(error).__name__}: {error}"
+            )
+            return False
+        finally:
+            discard_output(temporary)
+
     def execute(
             self,
             declaration_file: str,
@@ -298,6 +486,10 @@ class RdfExperimentMatrixResource:
             if not declaration_path.is_file():
                 raise FileNotFoundError(f"experiment declaration is missing: {declaration_path}")
             manifest_path = input_file(str(self._shared), manifest_file)
+            _runtime_preflight(
+                declaration_path, manifest_path, adapter_options,
+                adapter_option_env,
+            )
             experiments, original_artifacts = load_rdf_experiment_declaration(declaration_path)
             artifacts = _stage_artifacts(declaration_path, original_artifacts, self._shared)
             specifications = {

@@ -532,3 +532,17 @@ KROWN identifies `oxigraph/memory` and `oxigraph/rocksdb` as SPARQL HTTP systems
 `RdfExperimentMatrixResource` loads any external `rdf-experiment-declaration-v1`. It stages verified representation files, resolves registered system adapters, and writes one JSONL file per binding. It publishes one atomic summary and one compressed result archive. The resource contains no benchmark-specific dataset or workload rules. Workload preparation and semantic baseline selection remain external intent.
 
 Server adapter values that KROWN cannot derive, such as explicit index and server commands, must be supplied through `adapter_options`. KROWN does not guess runtime configuration. RDFLib-backed systems use the persistent killable worker.
+
+### RDF experiment matrix runtime preflight
+
+`RdfExperimentMatrixResource.preflight` validates a complete execution plan without
+starting any query system. It verifies the external declaration, representation
+receipts and files, adapter imports, explicit runtime options, installed Python
+modules, local Docker images, candidate TCP ports, and Docker daemon access.
+Placeholder values such as `<validated command>`, `TODO`, and `replace-me` are
+rejected. The BSBM matrix scenario publishes the dry plan before execution.
+
+The executor repeats the preflight immediately before staging and running the
+matrix. This reduces the interval between port and runtime checks and system
+startup. A preflight does not pull or build images, start containers, execute
+queries, or modify benchmark artifacts.
