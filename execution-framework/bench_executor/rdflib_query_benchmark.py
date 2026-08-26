@@ -19,7 +19,7 @@ from bench_executor.rdf_query_benchmark import _load_query_manifest, \
         _QueryOutcome, _QueryTimeoutError, _RdfQueryAdapter, \
         _RdfQueryBenchmark
 
-SUPPORTED_ENGINES = frozenset({'vortex', 'cottas'})
+SUPPORTED_ENGINES = frozenset({'default', 'vortex', 'cottas'})
 
 
 def _resolve_input_path(shared_directory: str, declared_path: str) -> str:
@@ -79,17 +79,9 @@ class _RdfLibAdapter(_RdfQueryAdapter):
         if self._graph is not None:
             raise RuntimeError('RDFLib adapter is already open')
 
-        if self._engine == 'vortex':
-            from vortex_rdflib import VortexStore
-            store = VortexStore(
-                self._artifact_path,
-                layout=self._vortex_layout,
-                backend='native',
-            )
-        else:
-            from pycottas.cottas_store import COTTASStore
-            store = COTTASStore(self._artifact_path)
-        self._graph = Graph(store=store)
+        self._graph = _make_rdflib_graph(
+            self._engine, self._artifact_path, self._vortex_layout
+        )
 
     def execute(self, query: str) -> _QueryOutcome:
         if self._graph is None:
@@ -127,6 +119,14 @@ class _RdfLibAdapter(_RdfQueryAdapter):
 def _make_rdflib_graph(engine: str, artifact_path: str,
                        vortex_layout: str) -> Graph:
     """Create one RDFLib graph for a supported prepared artifact."""
+    if engine == 'default':
+        graph = Graph()
+        try:
+            graph.parse(artifact_path, format='nt')
+        except BaseException:
+            graph.close()
+            raise
+        return graph
     if engine == 'vortex':
         from vortex_rdflib import VortexStore
         store = VortexStore(
@@ -406,7 +406,7 @@ class RdfLibQueryBenchmark:
                 kill_grace_s: float = 1.0,
                 correctness_mode: str = 'fingerprint',
                 full_result_max_rows: int = 10000) -> bool:
-        """Execute a Vortex or COTTAS workload and save JSON Lines records."""
+        """Execute an RDFLib-backed workload and save JSON Lines records."""
         try:
             if engine not in SUPPORTED_ENGINES:
                 raise ValueError(f'Unsupported RDFLib engine: {engine}')

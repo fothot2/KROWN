@@ -510,3 +510,11 @@ The image build uses a clean local Vortex-RDF checkout at commit
 `0a0e51171aa42e79defdcd322bc1a328a93fcd11`. Set `VORTEX_RDF_SOURCE` before
 running the build script. KROWN verifies and consumes an existing `.vortex`
 artifact. It does not generate that representation.
+
+
+### RDFLib 7.6.0 default-Store baseline
+
+KROWN identifies this embedded baseline as `rdflib/default` over `rdf/source`.
+The persistent worker parses the N-Triples source once during startup.
+Parsing stays outside each query measurement. Each measurement includes
+`Graph.query()` and full result materialization.

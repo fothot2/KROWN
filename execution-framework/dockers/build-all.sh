@@ -144,6 +144,13 @@ docker build --build-arg COMUNICA_HDT_VERSION=$COMUNICA_HDT_VERSION \
     -t dtaikg/comunica-hdt:v$COMUNICA_HDT_VERSION .
 cd ..
 
+# RDFLib default Store
+RDFLIB_VERSION='7.6.0'
+echo "*** Building RDFLib $RDFLIB_VERSION ... ***"
+cd RDFLib
+docker build --build-arg RDFLIB_VERSION=$RDFLIB_VERSION -t dtaikg/rdflib:$RDFLIB_VERSION .
+cd ..
+
 # COTTAS
 COTTAS_VERSION='1.1.0'
 echo "*** Building COTTAS $COTTAS_VERSION ... ***"

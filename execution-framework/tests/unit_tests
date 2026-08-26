@@ -50,6 +50,8 @@ from bench_executor.sparql_http_benchmark import _SparqlHttpAdapter, \
         SparqlHttpBenchmark  # noqa: E402
 from bench_executor.vortex_rdf_system_adapter import (  # noqa: E402
         VortexRdfRuntimeConfiguration, VortexRdfSystemAdapter)
+from bench_executor.rdflib_system_adapter import (  # noqa: E402
+        adapter_specification as rdflib_adapter_specification)
 from bench_executor.rdflib_query_benchmark import _resolve_input_path, \
         _resolve_output_path, _RdfLibAdapter, _WorkerRdfLibAdapter, \
         RdfLibQueryBenchmark  # noqa: E402
@@ -2599,6 +2601,27 @@ class UnitTests(unittest.TestCase):
         package = json.loads((root / 'dockers' / 'ComunicaHDT' / 'package.json').read_text())
         self.assertIn('node:${NODE_VERSION}-bookworm-slim', dockerfile)
         self.assertEqual(package['dependencies']['@comunica/query-sparql-hdt'], '5.0.1')
+
+
+    def test_rdflib_default_system_specification_is_canonical(self):
+        specification = rdflib_adapter_specification()
+        self.assertEqual(specification.system_id, 'rdflib/default')
+        self.assertEqual(specification.configuration.kind, 'embedded')
+        self.assertEqual(specification.configuration.representation, 'rdf/source')
+        self.assertEqual(specification.parameters['engine'], 'default')
+
+    def test_rdflib_default_graph_parses_before_query_timing(self):
+        from bench_executor.rdflib_query_benchmark import _make_rdflib_graph
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'data.nt'
+            path.write_text('<http://example.org/s> <http://example.org/p> <http://example.org/o> .\n', encoding='utf-8')
+            graph = _make_rdflib_graph('default', str(path), 'unused')
+            try:
+                self.assertEqual(len(graph), 1)
+                self.assertEqual(len(list(graph.query('SELECT * WHERE { ?s ?p ?o } LIMIT 1'))), 1)
+            finally:
+                graph.close()
+
 
 if __name__ == '__main__':
     # SELinux causes weird permission denied issues, warn users
