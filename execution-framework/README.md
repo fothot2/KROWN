@@ -523,6 +523,6 @@ Parsing stays outside each query measurement. Each measurement includes
 
 KROWN identifies `oxigraph/memory` and `oxigraph/rocksdb` as SPARQL HTTP systems over `rdf/source`. The memory configuration omits persistent storage. The RocksDB configuration uses a private persistent directory. Both configurations load the verified N-Triples source before query timing.
 
-### BSBM Explore 1K declarative experiment bindings
+### External RDF experiment declarations
 
-`bsbm_experiment_bindings.py` binds `bsbm-explore-smoke` to all nine registered systems. It loads and verifies the four external representation receipts. It requires one shared source identity. It validates unique experiment IDs, complete system coverage, representation compatibility, and adapter-class resolution. This step does not start containers, execute SPARQL queries, or generate measurements.
+`rdf_experiment_manifest.py` loads versioned experiment intent from the benchmarks repository. It verifies representation receipts, shared logical source identity, registered systems, and representation compatibility. KROWN owns generic orchestration. Benchmark names, datasets, workloads, receipt selections, and system matrices remain outside the KROWN execution core.
