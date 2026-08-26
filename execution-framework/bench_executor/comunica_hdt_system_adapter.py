@@ -49,3 +49,10 @@ class ComunicaHdtSystemAdapter:
     def docker_command(self, *, host_artifact: str | Path, query: str, container_artifact: str = "/data/dataset.hdt") -> list[str]:
         artifact = self.prepare(host_artifact)
         return ["docker", "run", "--rm", "--network", "none", "--volume", f"{artifact}:{container_artifact}:ro", self.image, *self.query_command(container_artifact=container_artifact, query=query)]
+
+def system_configuration():
+    from bench_executor.experiment_matrix_contract import SystemConfiguration
+    return SystemConfiguration(system="comunica",configuration="hdt",kind="file-backed",representation=REPRESENTATION,parameters={"image":IMAGE,"package":PACKAGE,"package_version":PACKAGE_VERSION,"node_version":NODE_VERSION})
+def adapter_specification():
+    from bench_executor.system_adapter_contract import LifecycleCapabilities,SystemAdapterSpecification
+    return SystemAdapterSpecification(configuration=system_configuration(),adapter="bench_executor.comunica_hdt_system_adapter:ComunicaHdtSystemAdapter",capabilities=LifecycleCapabilities.for_kind("file-backed"),parameters={"engine":"comunica-hdt"})

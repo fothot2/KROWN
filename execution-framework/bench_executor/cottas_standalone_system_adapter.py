@@ -26,3 +26,10 @@ class CottasStandaloneSystemAdapter:
  def docker_command(self,host_artifact,sparql_query,container_artifact=CONTAINER_ARTIFACT):
   artifact=self.prepare(host_artifact)
   return ["docker","run","--rm","--network","none","--volume",f"{artifact}:{container_artifact}:ro",self.image,*self.query_command(container_artifact,sparql_query)]
+
+def system_configuration():
+ from bench_executor.experiment_matrix_contract import SystemConfiguration
+ return SystemConfiguration(system="pycottas",configuration="default",kind="file-backed",representation=REPRESENTATION,parameters={"image":IMAGE,"package":"pycottas","package_version":"1.1.0","sparql_engine":"rdflib"})
+def adapter_specification():
+ from bench_executor.system_adapter_contract import LifecycleCapabilities,SystemAdapterSpecification
+ return SystemAdapterSpecification(configuration=system_configuration(),adapter="bench_executor.cottas_standalone_system_adapter:CottasStandaloneSystemAdapter",capabilities=LifecycleCapabilities.for_kind("file-backed"),parameters={"engine":"cottas","sparql_engine":"rdflib"})
