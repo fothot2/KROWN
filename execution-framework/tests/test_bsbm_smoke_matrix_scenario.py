@@ -16,6 +16,7 @@ class BsbmSmokeMatrixScenarioTests(unittest.TestCase):
   self.assertEqual(matrix['manifest_file'],'manifests/bsbm.json')
   self.assertEqual(matrix['results_file'],'raw/bsbm-matrix-summary.json')
   self.assertEqual(matrix['output_file'],'raw/bsbm-matrix-results.tar.gz')
+  self.assertEqual(matrix['selected_systems_env'],'KROWN_RDF_MATRIX_SYSTEMS')
  def test_scenario_does_not_duplicate_experiment_bindings(self):
   text=json.dumps(self.metadata,sort_keys=True)
   self.assertNotIn('representations',text);self.assertNotIn('bindings',text)

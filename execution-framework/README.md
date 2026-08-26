@@ -556,3 +556,25 @@ directory and mount point, which satisfies the upstream entrypoint contract.
 
 The Oxigraph 0.5.9 builder installs the Clang and CMake toolchain required by
 the RocksDB bindings. Build the image explicitly before matrix preflight.
+
+### Staged RDF matrix execution
+
+The external declaration remains the complete benchmark intent. Runtime selection
+is optional and generic. Set `KROWN_RDF_MATRIX_SYSTEMS` to a comma-separated list
+of registered system IDs before scenario execution. KROWN validates unknown and
+duplicate IDs, then preserves declaration order. If the variable is unset, KROWN
+executes all declared systems. The scenario preflight always validates all nine
+BSBM bindings.
+
+Run a preflight directly without starting systems:
+
+```bash
+python execution-framework/preflight_rdf_matrix.py \
+  --declaration /users/u0182905/benchmarks/BSBM/experiments/explore-1k-smoke.json \
+  --manifest benchmark-integration/bsbm-smoke/data/shared/manifests/bsbm.json \
+  --output /tmp/bsbm-matrix-preflight.json
+```
+
+Preflight validates the query manifest, declarations, receipts, adapter imports,
+Python modules, local images, ports, and stale matrix-owned containers. It does
+not start a container, load data, build an index, or execute SPARQL.

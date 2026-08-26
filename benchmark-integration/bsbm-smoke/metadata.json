@@ -45,7 +45,8 @@
         "declaration_file": "/users/u0182905/benchmarks/BSBM/experiments/explore-1k-smoke.json",
         "manifest_file": "manifests/bsbm.json",
         "results_file": "raw/bsbm-matrix-summary.json",
-        "output_file": "raw/bsbm-matrix-results.tar.gz"
+        "output_file": "raw/bsbm-matrix-results.tar.gz",
+        "selected_systems_env": "KROWN_RDF_MATRIX_SYSTEMS"
       }
     }
   ]

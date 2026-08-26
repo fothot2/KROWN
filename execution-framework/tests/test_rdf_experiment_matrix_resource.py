@@ -14,8 +14,10 @@ from bench_executor.rdf_experiment_matrix_resource import (
     _constructor_arguments,
     _environment_adapter_options,
     _require_concrete_runtime_value,
+    _environment_system_selection,
     _result_summary,
     _runtime_preflight,
+    _selected_experiments,
     _stage_artifacts,
 )
 
@@ -67,7 +69,7 @@ class RdfExperimentMatrixResourceTests(unittest.TestCase):
         specification=SimpleNamespace(system_id='rdflib/default', configuration=configuration, adapter='bench_executor.rdflib_system_adapter:RdfLibSystemAdapter', parameters={'engine':'default'})
         with tempfile.TemporaryDirectory() as directory:
             declaration=Path(directory)/'declaration.json'; manifest=Path(directory)/'manifest.json'
-            declaration.write_text('{}'); manifest.write_text('{}')
+            declaration.write_text('{}'); manifest.write_text(json.dumps({'schema_version':1,'workload':'sample-smoke','dataset':'tiny','query_count':1,'queries':[{'query_id':'q1','query':'ASK { ?s ?p ?o }'}]}))
             daemon=SimpleNamespace(returncode=0,stdout='"29.1.3"',stderr='')
             with patch('bench_executor.rdf_experiment_matrix_resource.load_rdf_experiment_declaration',return_value=((experiment,),{'rdf/source':artifact})), patch('bench_executor.rdf_experiment_matrix_resource.system_adapter_specifications',return_value=(specification,)), patch('bench_executor.rdf_experiment_matrix_resource.shutil.which',return_value='/usr/bin/docker'), patch('bench_executor.rdf_experiment_matrix_resource.subprocess.run',return_value=daemon), patch('bench_executor.rdf_experiment_matrix_resource.importlib.util.find_spec',return_value=object()), patch('bench_executor.rdf_experiment_matrix_resource._docker_image_available',return_value=True), patch('bench_executor.rdf_experiment_matrix_resource._port_available',return_value=True):
                 report=_runtime_preflight(declaration,manifest)
@@ -80,7 +82,7 @@ class RdfExperimentMatrixResourceTests(unittest.TestCase):
         configuration=SystemConfiguration('comunica','hdt','file-backed','hdt/default',parameters={'image':'dtaikg/comunica-hdt:v5.0.1'})
         specification=SimpleNamespace(system_id='comunica/hdt',configuration=configuration,adapter='bench_executor.comunica_hdt_system_adapter:ComunicaHdtSystemAdapter',parameters={'engine':'comunica-hdt'})
         with tempfile.TemporaryDirectory() as directory:
-            declaration=Path(directory)/'declaration.json'; manifest=Path(directory)/'manifest.json'; declaration.write_text('{}'); manifest.write_text('{}')
+            declaration=Path(directory)/'declaration.json'; manifest=Path(directory)/'manifest.json'; declaration.write_text('{}'); manifest.write_text(json.dumps({'schema_version':1,'workload':'sample-smoke','dataset':'tiny','query_count':1,'queries':[{'query_id':'q1','query':'ASK { ?s ?p ?o }'}]}))
             daemon=SimpleNamespace(returncode=0,stdout='"29.1.3"',stderr='')
             with patch('bench_executor.rdf_experiment_matrix_resource.load_rdf_experiment_declaration',return_value=((experiment,),{'hdt/default':artifact})), patch('bench_executor.rdf_experiment_matrix_resource.system_adapter_specifications',return_value=(specification,)), patch('bench_executor.rdf_experiment_matrix_resource.shutil.which',return_value='/usr/bin/docker'), patch('bench_executor.rdf_experiment_matrix_resource.subprocess.run',return_value=daemon), patch('bench_executor.rdf_experiment_matrix_resource._docker_image_available',return_value=False):
                 with self.assertRaisesRegex(RuntimeError,'missing local Docker images'):
@@ -92,11 +94,40 @@ class RdfExperimentMatrixResourceTests(unittest.TestCase):
         configuration=SystemConfiguration('qlever','default','server','rdf/source')
         specification=SimpleNamespace(system_id='qlever/default',configuration=configuration,adapter='bench_executor.qlever_system_adapter:QLeverSystemAdapter',parameters={})
         with tempfile.TemporaryDirectory() as directory:
-            declaration=Path(directory)/'declaration.json'; manifest=Path(directory)/'manifest.json'; declaration.write_text('{}'); manifest.write_text('{}')
+            declaration=Path(directory)/'declaration.json'; manifest=Path(directory)/'manifest.json'; declaration.write_text('{}'); manifest.write_text(json.dumps({'schema_version':1,'workload':'sample-smoke','dataset':'tiny','query_count':1,'queries':[{'query_id':'q1','query':'ASK { ?s ?p ?o }'}]}))
             daemon=SimpleNamespace(returncode=0,stdout='"29.1.3"',stderr='')
             with patch('bench_executor.rdf_experiment_matrix_resource.load_rdf_experiment_declaration',return_value=((experiment,),{'rdf/source':artifact})), patch('bench_executor.rdf_experiment_matrix_resource.system_adapter_specifications',return_value=(specification,)), patch('bench_executor.rdf_experiment_matrix_resource.shutil.which',return_value='/usr/bin/docker'), patch('bench_executor.rdf_experiment_matrix_resource.subprocess.run',return_value=daemon), patch('bench_executor.rdf_experiment_matrix_resource._docker_image_available',return_value=True), patch('bench_executor.rdf_experiment_matrix_resource._port_available',return_value=True):
                 report=_runtime_preflight(declaration,manifest)
         self.assertIn('kgconstruct/qlever:v0.6.0',report['required_images'])
+
+    def test_system_selection_preserves_declaration_order(self):
+        experiments = tuple(
+            SimpleNamespace(system_configuration=value)
+            for value in ("a/one", "b/two", "c/three")
+        )
+        selected = _selected_experiments(
+            experiments, ["c/three", "a/one"]
+        )
+        self.assertEqual(
+            [item.system_configuration for item in selected],
+            ["a/one", "c/three"],
+        )
+
+    def test_system_selection_rejects_unknown_and_duplicates(self):
+        experiments = (SimpleNamespace(system_configuration="a/one"),)
+        with self.assertRaisesRegex(ValueError, "unknown systems"):
+            _selected_experiments(experiments, ["missing/default"])
+        with self.assertRaisesRegex(ValueError, "duplicate systems"):
+            _selected_experiments(experiments, ["a/one", "a/one"])
+
+    def test_environment_system_selection_is_optional(self):
+        self.assertIsNone(_environment_system_selection("TEST_SYSTEMS", {}))
+        self.assertEqual(
+            _environment_system_selection(
+                "TEST_SYSTEMS", {"TEST_SYSTEMS": "c/three, a/one"}
+            ),
+            ["c/three", "a/one"],
+        )
 
 
 if __name__ == '__main__':

@@ -73,6 +73,53 @@ def _docker_image_available(image: str) -> bool:
     return result.returncode == 0
 
 
+def _selected_experiments(experiments, selected_systems):
+    """Select systems in declaration order without changing benchmark intent."""
+    if selected_systems is None:
+        return tuple(experiments)
+    if not isinstance(selected_systems, (list, tuple)) or not selected_systems:
+        raise ValueError("selected_systems must be a non-empty array")
+    if any(not isinstance(item, str) or not item.strip()
+           for item in selected_systems):
+        raise ValueError("selected_systems entries must be non-empty strings")
+    normalized = [item.strip() for item in selected_systems]
+    if len(set(normalized)) != len(normalized):
+        raise ValueError("selected_systems contains duplicate systems")
+    available = {item.system_configuration for item in experiments}
+    unknown = sorted(set(normalized).difference(available))
+    if unknown:
+        raise ValueError("selected_systems contains unknown systems: " + ", ".join(unknown))
+    selected = set(normalized)
+    return tuple(item for item in experiments
+                 if item.system_configuration in selected)
+
+
+def _environment_system_selection(variable, environment=None):
+    """Read one optional comma-separated runtime selection."""
+    if variable is None:
+        return None
+    if not isinstance(variable, str) or not variable.strip():
+        raise ValueError("selected_systems_env must be a non-empty string")
+    source = os.environ if environment is None else environment
+    value = source.get(variable)
+    if value is None or not value.strip():
+        return None
+    return [item.strip() for item in value.split(",")]
+
+
+def _running_krown_containers() -> list[str]:
+    """Return running containers whose stable names belong to matrix systems."""
+    result = subprocess.run(
+        ["docker", "ps", "--format", "{{.Names}}"],
+        text=True, capture_output=True, check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError("cannot inspect running Docker containers")
+    prefixes = ("Fuseki", "Virtuoso", "QLever", "Oxigraph-")
+    return sorted(name for name in result.stdout.splitlines()
+                  if name.startswith(prefixes))
+
+
 def _port_available(port: int) -> bool:
     """Check whether one loopback TCP port can be bound now."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
@@ -89,13 +136,17 @@ def _runtime_preflight(
         manifest_path: Path,
         adapter_options: Mapping[str, Mapping[str, Any]] | None = None,
         adapter_option_env: Mapping[str, Mapping[str, str]] | None = None,
-        environment: Mapping[str, str] | None = None) -> dict[str, Any]:
+        environment: Mapping[str, str] | None = None,
+        selected_systems: list[str] | tuple[str, ...] | None = None) -> dict[str, Any]:
     """Build and validate a complete plan without starting query systems."""
     if not declaration_path.is_file():
         raise FileNotFoundError(f"experiment declaration is missing: {declaration_path}")
     if not manifest_path.is_file():
         raise FileNotFoundError(f"query manifest is missing: {manifest_path}")
+    _load_query_manifest(str(manifest_path))
     experiments, artifacts = load_rdf_experiment_declaration(declaration_path)
+    declared_systems = [item.system_configuration for item in experiments]
+    experiments = _selected_experiments(experiments, selected_systems)
     specifications = {item.system_id: item for item in system_adapter_specifications()}
     options = {} if adapter_options is None else {
         key: dict(value) for key, value in adapter_options.items()
@@ -120,6 +171,12 @@ def _runtime_preflight(
     )
     if daemon.returncode != 0:
         raise RuntimeError("Docker daemon is not available")
+    stale_containers = _running_krown_containers()
+    if stale_containers:
+        raise RuntimeError(
+            "matrix-owned Docker containers are already running: "
+            + ", ".join(stale_containers)
+        )
 
     images: set[str] = set()
     ports: set[int] = set()
@@ -191,6 +248,8 @@ def _runtime_preflight(
         "required_images": sorted(images),
         "required_python_modules": sorted(modules),
         "required_ports": sorted(ports),
+        "declared_systems": declared_systems,
+        "selected_systems": [item["system"] for item in plan],
         "experiments": plan,
     }
 
@@ -442,15 +501,25 @@ class RdfExperimentMatrixResource:
             manifest_file: str,
             output_file: str,
             adapter_options: Mapping[str, Mapping[str, Any]] | None = None,
-            adapter_option_env: Mapping[str, Mapping[str, str]] | None = None) -> bool:
+            adapter_option_env: Mapping[str, Mapping[str, str]] | None = None,
+            selected_systems: list[str] | None = None,
+            selected_systems_env: str | None = None) -> bool:
         """Publish a dry runtime plan without starting any query system."""
         temporary = None
         try:
             declaration_path = Path(declaration_file).expanduser().resolve()
             manifest_path = input_file(str(self._shared), manifest_file)
+            environment_selection = _environment_system_selection(
+                selected_systems_env
+            )
+            if selected_systems is not None and environment_selection is not None:
+                raise ValueError(
+                    "selected_systems and selected_systems_env are mutually exclusive"
+                )
+            selection = selected_systems if selected_systems is not None else environment_selection
             report = _runtime_preflight(
                 declaration_path, manifest_path, adapter_options,
-                adapter_option_env,
+                adapter_option_env, selected_systems=selection,
             )
             output_path = resolve_shared_path(
                 str(self._shared), output_file, "Output"
@@ -478,8 +547,10 @@ class RdfExperimentMatrixResource:
             results_file: str,
             output_file: str,
             adapter_options: Mapping[str, Mapping[str, Any]] | None = None,
-            adapter_option_env: Mapping[str, Mapping[str, str]] | None = None) -> bool:
-        """Execute all declaration bindings and publish summary plus archive."""
+            adapter_option_env: Mapping[str, Mapping[str, str]] | None = None,
+            selected_systems: list[str] | None = None,
+            selected_systems_env: str | None = None) -> bool:
+        """Execute selected declaration bindings and publish summary plus archive."""
         summary_temporary = archive_temporary = None
         run_directory = None
         try:
@@ -487,11 +558,20 @@ class RdfExperimentMatrixResource:
             if not declaration_path.is_file():
                 raise FileNotFoundError(f"experiment declaration is missing: {declaration_path}")
             manifest_path = input_file(str(self._shared), manifest_file)
+            environment_selection = _environment_system_selection(
+                selected_systems_env
+            )
+            if selected_systems is not None and environment_selection is not None:
+                raise ValueError(
+                    "selected_systems and selected_systems_env are mutually exclusive"
+                )
+            selection = selected_systems if selected_systems is not None else environment_selection
             _runtime_preflight(
                 declaration_path, manifest_path, adapter_options,
-                adapter_option_env,
+                adapter_option_env, selected_systems=selection,
             )
             experiments, original_artifacts = load_rdf_experiment_declaration(declaration_path)
+            experiments = _selected_experiments(experiments, selection)
             artifacts = _stage_artifacts(declaration_path, original_artifacts, self._shared)
             specifications = {
                 item.system_id: item for item in system_adapter_specifications()
