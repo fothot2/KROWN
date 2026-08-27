@@ -2332,6 +2332,68 @@ class UnitTests(unittest.TestCase):
 
             self.assertFalse(adapter.prepare())
 
+    def test_fuseki_system_adapter_accepts_nested_staged_source_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            data = Path(directory) / 'data'
+            source = data / 'shared/rdf-matrix-artifacts/rdf--source--0.nt'
+            source.parent.mkdir(parents=True)
+            source.write_bytes(b'<s> <p> <o> .\n')
+            artifact = DatasetArtifact(
+                benchmark='bsbm', dataset='explore-1k',
+                source_format='ntriples',
+                source_size_bytes=source.stat().st_size,
+                source_sha256=sha256_file(source),
+                representation='rdf/source',
+                files=(ArtifactFile(
+                    path='rdf-matrix-artifacts/rdf--source--0.nt',
+                    size_bytes=source.stat().st_size,
+                    sha256=sha256_file(source),
+                ),),
+            )
+            stock = MagicMock()
+            with patch(
+                    'bench_executor.fuseki_system_adapter.Fuseki',
+                    return_value=stock) as fuseki:
+                adapter = FusekiSystemAdapter(
+                    artifact, str(data), str(Path(directory) / 'config'),
+                    str(Path(directory) / 'log'),
+                )
+                success = adapter.prepare()
+
+            self.assertTrue(success)
+            fuseki.assert_called_once_with(
+                str(data), str(Path(directory) / 'config'),
+                str(Path(directory) / 'log'), False,
+            )
+
+    def test_fuseki_system_adapter_rejects_symlink_escape(self):
+        with tempfile.TemporaryDirectory() as directory:
+            data = Path(directory) / 'data'
+            shared = data / 'shared'
+            shared.mkdir(parents=True)
+            outside = data / 'outside.nt'
+            outside.write_bytes(b'<s> <p> <o> .\n')
+            link = shared / 'escape.nt'
+            link.symlink_to(outside)
+            artifact = DatasetArtifact(
+                benchmark='bsbm', dataset='explore-1k',
+                source_format='ntriples',
+                source_size_bytes=outside.stat().st_size,
+                source_sha256=sha256_file(outside),
+                representation='rdf/source',
+                files=(ArtifactFile(
+                    path='escape.nt',
+                    size_bytes=outside.stat().st_size,
+                    sha256=sha256_file(outside),
+                ),),
+            )
+            adapter = FusekiSystemAdapter(
+                artifact, str(data), str(Path(directory) / 'config'),
+                str(Path(directory) / 'log'),
+            )
+
+            self.assertFalse(adapter.prepare())
+
     def test_virtuoso_system_adapter_reuses_stock_virtuoso_lifecycle(self):
         with tempfile.TemporaryDirectory() as directory:
             shared = os.path.join(directory, 'data', 'shared')

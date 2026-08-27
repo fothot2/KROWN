@@ -54,7 +54,11 @@ class FusekiSystemAdapter(SparqlHttpSystemAdapter):
     def prepare(self) -> bool:
         shared = (self._data_path / 'shared').resolve()
         source = (shared / self._rdf_file.path).resolve()
-        if source.parent != shared or not source.is_file():
+        try:
+            source.relative_to(shared)
+        except ValueError:
+            return False
+        if not source.is_file():
             return False
         if source.stat().st_size != self._rdf_file.size_bytes:
             return False
