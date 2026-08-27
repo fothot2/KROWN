@@ -141,6 +141,31 @@ def normalize_sparql_json_result(document: dict,
     """Normalize one complete SPARQL Results JSON document."""
     if not isinstance(document, dict):
         raise ValueError('SPARQL JSON result must be an object')
+    worker_kind = document.get('kind')
+    if worker_kind == 'select':
+        variables = document.get('variables')
+        rows = document.get('rows')
+        if not isinstance(variables, list) or not isinstance(rows, list):
+            raise ValueError('worker SELECT result is invalid')
+        document = {'head': {'vars': variables}, 'results': {'bindings': rows}}
+    elif worker_kind == 'ask':
+        document = {'boolean': document.get('boolean')}
+    elif worker_kind == 'graph':
+        triples = document.get('triples')
+        if not isinstance(triples, list):
+            raise ValueError('worker graph result is invalid')
+        normalized_rows = sorted(triples, key=_canonical_json)
+        payload = {'result_kind': 'graph', 'triples': normalized_rows}
+        features = classify_query(query)
+        output = {
+            'result_count': len(normalized_rows),
+            'result_kind': 'graph', 'result_variables': [],
+            'result_ordered': False, 'result_fingerprint': _fingerprint(payload),
+            'contains_blank_nodes': any(term.get('type') == 'bnode' for row in normalized_rows for term in row),
+            'normalized_result': payload,
+        }
+        output.update(comparison_metadata(features, output['contains_blank_nodes']))
+        return output
     features = classify_query(query)
     if 'boolean' in document:
         value = document['boolean']

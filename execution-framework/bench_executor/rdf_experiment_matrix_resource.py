@@ -30,6 +30,7 @@ from bench_executor.rdf_query_benchmark import (
     _RdfQueryBenchmark,
 )
 from bench_executor.rdflib_query_benchmark import RdfLibQueryBenchmark
+from bench_executor.persistent_jsonl_query_adapter import PersistentJsonlQueryAdapter
 from bench_executor.sparql_http_benchmark import SparqlHttpBenchmark
 from bench_executor.sparql_result import normalize_sparql_json_result
 from bench_executor.standalone_benchmark import (
@@ -88,7 +89,8 @@ def _selected_experiments(experiments, selected_systems):
     available = {item.system_configuration for item in experiments}
     unknown = sorted(set(normalized).difference(available))
     if unknown:
-        raise ValueError("selected_systems contains unknown systems: " + ", ".join(unknown))
+        raise ValueError(
+            "selected_systems contains unknown systems: " + ", ".join(unknown))
     selected = set(normalized)
     return tuple(item for item in experiments
                  if item.system_configuration in selected)
@@ -140,14 +142,16 @@ def _runtime_preflight(
         selected_systems: list[str] | tuple[str, ...] | None = None) -> dict[str, Any]:
     """Build and validate a complete plan without starting query systems."""
     if not declaration_path.is_file():
-        raise FileNotFoundError(f"experiment declaration is missing: {declaration_path}")
+        raise FileNotFoundError(
+            f"experiment declaration is missing: {declaration_path}")
     if not manifest_path.is_file():
         raise FileNotFoundError(f"query manifest is missing: {manifest_path}")
     _load_query_manifest(str(manifest_path))
     experiments, artifacts = load_rdf_experiment_declaration(declaration_path)
     declared_systems = [item.system_configuration for item in experiments]
     experiments = _selected_experiments(experiments, selected_systems)
-    specifications = {item.system_id: item for item in system_adapter_specifications()}
+    specifications = {
+        item.system_id: item for item in system_adapter_specifications()}
     options = {} if adapter_options is None else {
         key: dict(value) for key, value in adapter_options.items()
     }
@@ -160,7 +164,8 @@ def _runtime_preflight(
         options[system_id] = merged
     unknown = sorted(set(options).difference(specifications))
     if unknown:
-        raise ValueError("adapter_options contains unknown systems: " + ", ".join(unknown))
+        raise ValueError(
+            "adapter_options contains unknown systems: " + ", ".join(unknown))
 
     docker = shutil.which("docker")
     if docker is None:
@@ -185,7 +190,8 @@ def _runtime_preflight(
     for experiment in experiments:
         system_id = experiment.system_configuration
         specification = specifications[system_id]
-        module_name, separator, class_name = specification.adapter.partition(":")
+        module_name, separator, class_name = specification.adapter.partition(
+            ":")
         if not separator:
             raise ValueError(f"invalid adapter path: {specification.adapter}")
         module = __import__(module_name, fromlist=[class_name])
@@ -208,16 +214,20 @@ def _runtime_preflight(
             modules.add(_ENGINE_MODULES[engine])
         image = supplied.get("image") or configuration.parameters.get("image")
         if isinstance(image, str):
-            images.add(_require_concrete_runtime_value(image, f"{system_id}.image"))
+            images.add(_require_concrete_runtime_value(
+                image, f"{system_id}.image"))
         if system_id == "fuseki/default":
-            images.add("kgconstruct/fuseki:v6.2.0"); ports.add(3030)
+            images.add("kgconstruct/fuseki:v6.2.0")
+            ports.add(3030)
         elif system_id == "virtuoso/default":
-            images.add("kgconstruct/virtuoso:v7.2.17"); ports.update((1111, 8890))
+            images.add("kgconstruct/virtuoso:v7.2.17")
+            ports.update((1111, 8890))
         elif system_id == "qlever/default":
             images.add(str(supplied.get("image", "kgconstruct/qlever:v0.6.0")))
             ports.add(int(supplied.get("port", 7001)))
         elif system_id.startswith("oxigraph/"):
-            images.add("dtaikg/oxigraph:0.5.9"); ports.add(int(supplied.get("port", 7878)))
+            images.add("dtaikg/oxigraph:0.5.9")
+            ports.add(int(supplied.get("port", 7878)))
         elif system_id == "comunica/hdt":
             images.add(str(configuration.parameters["image"]))
         plan.append({
@@ -233,13 +243,17 @@ def _runtime_preflight(
         name for name in modules if importlib.util.find_spec(name) is None
     )
     if missing_modules:
-        raise RuntimeError("missing Python runtime modules: " + ", ".join(missing_modules))
-    missing_images = sorted(image for image in images if not _docker_image_available(image))
+        raise RuntimeError(
+            "missing Python runtime modules: " + ", ".join(missing_modules))
+    missing_images = sorted(
+        image for image in images if not _docker_image_available(image))
     if missing_images:
-        raise RuntimeError("missing local Docker images: " + ", ".join(missing_images))
+        raise RuntimeError("missing local Docker images: " +
+                           ", ".join(missing_images))
     busy_ports = sorted(port for port in ports if not _port_available(port))
     if busy_ports:
-        raise RuntimeError("required TCP ports are busy: " + ", ".join(map(str, busy_ports)))
+        raise RuntimeError("required TCP ports are busy: " +
+                           ", ".join(map(str, busy_ports)))
     return {
         "schema": PREFLIGHT_SCHEMA,
         "declaration_sha256": _sha256(declaration_path),
@@ -266,7 +280,8 @@ def _atomic_json(path: Path, value: Mapping[str, Any]) -> None:
     temporary = temporary_output(path)
     try:
         temporary.write_text(
-            json.dumps(value, indent=2, sort_keys=True, allow_nan=False) + "\n",
+            json.dumps(value, indent=2, sort_keys=True,
+                       allow_nan=False) + "\n",
             encoding="utf-8",
         )
         commit_output(temporary, path)
@@ -286,20 +301,24 @@ def _stage_artifacts(
     stage_root = shared / "rdf-matrix-artifacts"
     stage_root.mkdir(parents=True, exist_ok=True)
     for representation, artifact in artifacts.items():
-        receipt = (benchmark_root / declaration["representations"][representation]).resolve()
+        receipt = (benchmark_root /
+                   declaration["representations"][representation]).resolve()
         receipt_value = json.loads(receipt.read_text(encoding="utf-8"))
         if len(receipt_value["files"]) != len(artifact.files):
-            raise ValueError(f"receipt file count changed for {representation}")
+            raise ValueError(
+                f"receipt file count changed for {representation}")
         files = []
         for index, (record, declared) in enumerate(zip(receipt_value["files"], artifact.files)):
             source = (receipt.parent / record["path"]).resolve()
             try:
                 source.relative_to(receipt.parent.resolve())
             except ValueError as error:
-                raise ValueError("representation file escapes its receipt directory") from error
+                raise ValueError(
+                    "representation file escapes its receipt directory") from error
             if (not source.is_file() or source.stat().st_size != declared.size_bytes
                     or _sha256(source) != declared.sha256):
-                raise ValueError(f"representation file differs from receipt: {source}")
+                raise ValueError(
+                    f"representation file differs from receipt: {source}")
             suffix = source.suffix
             relative = Path("rdf-matrix-artifacts") / (
                 representation.replace("/", "--") + f"--{index}{suffix}"
@@ -308,13 +327,15 @@ def _stage_artifacts(
             try:
                 target.relative_to(shared.resolve())
             except ValueError as error:
-                raise ValueError("staged artifact escapes data/shared") from error
+                raise ValueError(
+                    "staged artifact escapes data/shared") from error
             target.unlink(missing_ok=True)
             try:
                 os.link(source, target)
             except OSError:
                 shutil.copy2(source, target)
-            files.append(ArtifactFile(relative.as_posix(), target.stat().st_size, _sha256(target)))
+            files.append(ArtifactFile(relative.as_posix(),
+                         target.stat().st_size, _sha256(target)))
         staged[representation] = DatasetArtifact(
             benchmark=artifact.benchmark,
             dataset=artifact.dataset,
@@ -365,7 +386,6 @@ def _constructor_arguments(
     return arguments
 
 
-
 def _environment_adapter_options(
         declarations: Mapping[str, Mapping[str, str]] | None,
         environment: Mapping[str, str] | None = None) -> dict[str, dict[str, str]]:
@@ -380,56 +400,22 @@ def _environment_adapter_options(
         if not isinstance(system_id, str) or not system_id:
             raise ValueError("adapter_option_env system ID must be non-empty")
         if not isinstance(options, Mapping) or not options:
-            raise ValueError(f"adapter_option_env for {system_id} must be a non-empty object")
+            raise ValueError(
+                f"adapter_option_env for {system_id} must be a non-empty object")
         values = {}
         for option, variable in options.items():
             if not isinstance(option, str) or not option:
                 raise ValueError("adapter option name must be non-empty")
             if not isinstance(variable, str) or not variable:
-                raise ValueError("adapter environment variable name must be non-empty")
+                raise ValueError(
+                    "adapter environment variable name must be non-empty")
             value = source.get(variable)
             if not isinstance(value, str) or not value.strip():
-                raise ValueError(f"Environment variable is not set: {variable}")
+                raise ValueError(
+                    f"Environment variable is not set: {variable}")
             values[option] = value
         resolved[system_id] = values
     return resolved
-
-class _ComunicaQueryAdapter(_RdfQueryAdapter):
-    """Execute complete SPARQL queries through one file-backed command adapter."""
-    def __init__(self, adapter, artifact: Path, timeout_s: float):
-        self._adapter = adapter
-        self._artifact = artifact
-        self._timeout_s = timeout_s
-
-    def execute(self, query: str) -> _QueryOutcome:
-        command = self._adapter.docker_command(
-            host_artifact=self._artifact, query=query
-        )
-        try:
-            result = subprocess.run(
-                command, text=True, capture_output=True,
-                timeout=self._timeout_s, check=False,
-            )
-        except subprocess.TimeoutExpired as error:
-            raise _QueryTimeoutError(
-                f"file-backed query exceeded {self._timeout_s}s"
-            ) from error
-        if result.returncode != 0:
-            raise RuntimeError(result.stderr.strip() or result.stdout.strip())
-        try:
-            document = json.loads(result.stdout)
-        except json.JSONDecodeError as error:
-            raise RuntimeError("file-backed adapter returned invalid SPARQL JSON") from error
-        normalized = normalize_sparql_json_result(document, query)
-        return _QueryOutcome(
-            result_count=normalized["result_count"],
-            result_fingerprint=normalized["result_fingerprint"],
-            metadata={
-                "measurement_boundary": "file-backed-complete-response",
-                **{key: value for key, value in normalized.items()
-                   if key not in {"result_count", "result_fingerprint", "normalized_result"}},
-            },
-        )
 
 
 def _run_file_backed(
@@ -438,8 +424,10 @@ def _run_file_backed(
     manifest = _load_query_manifest(str(manifest_path))
     policy = experiment.execution_policy
     benchmark = _RdfQueryBenchmark(
-        adapter_factory=lambda: _ComunicaQueryAdapter(
-            adapter, artifact_path, float(policy["timeout_s"])
+        adapter_factory=lambda: PersistentJsonlQueryAdapter(
+            adapter=adapter, artifact=artifact_path,
+            timeout_s=float(policy["timeout_s"]),
+            normalizer=normalize_sparql_json_result,
         ),
         experiment_id=experiment.experiment_id,
         system=system_id,
@@ -461,7 +449,8 @@ def _compact_result_record(record: Mapping[str, Any]) -> dict[str, Any]:
     """Keep only fields needed for timing and semantic comparison."""
     missing = [name for name in _COMPACT_RESULT_FIELDS if name not in record]
     if missing:
-        raise ValueError("result record misses compact fields: " + ", ".join(missing))
+        raise ValueError(
+            "result record misses compact fields: " + ", ".join(missing))
     compact = {name: record[name] for name in _COMPACT_RESULT_FIELDS}
     if record["status"] != "ok":
         for name in ("error_type", "error_message"):
@@ -481,14 +470,16 @@ def _compact_result_file(path: Path) -> None:
             try:
                 records.append(_compact_result_record(json.loads(line)))
             except (json.JSONDecodeError, TypeError, ValueError) as error:
-                raise ValueError(f"cannot compact result line {line_number}: {error}") from error
+                raise ValueError(
+                    f"cannot compact result line {line_number}: {error}") from error
     if not records:
         raise ValueError(f"empty result artifact: {path}")
     temporary = path.with_name(f".{path.name}.compact.tmp")
     try:
         with temporary.open("w", encoding="utf-8") as stream:
             for record in records:
-                stream.write(json.dumps(record, separators=(",", ":"), allow_nan=False))
+                stream.write(json.dumps(
+                    record, separators=(",", ":"), allow_nan=False))
                 stream.write("\n")
         temporary.replace(path)
     finally:
@@ -529,7 +520,8 @@ def _result_summary(path: Path, experiment, representation: str) -> dict[str, An
                 try:
                     records.append(json.loads(line))
                 except json.JSONDecodeError as error:
-                    raise ValueError(f"invalid JSONL line {line_number}") from error
+                    raise ValueError(
+                        f"invalid JSONL line {line_number}") from error
     if not records:
         raise ValueError(f"empty result artifact: {path}")
     failures = sum(row.get("status") not in {"ok", "skipped", "unsupported"}
@@ -545,6 +537,7 @@ def _result_summary(path: Path, experiment, representation: str) -> dict[str, An
 
 class RdfExperimentMatrixResource:
     """Run a benchmark-neutral external RDF experiment declaration."""
+
     def __init__(self, data_path: str, config_path: str, directory: str,
                  verbose: bool):
         self._data_path = Path(data_path).resolve()
@@ -553,6 +546,7 @@ class RdfExperimentMatrixResource:
         self._directory = Path(directory).resolve()
         self._verbose = verbose
         self._logger = Logger(__name__, str(self._directory), verbose)
+        self.last_outcome = "success"
         self._shared.mkdir(parents=True, exist_ok=True)
 
     @property
@@ -621,13 +615,15 @@ class RdfExperimentMatrixResource:
             failure_results_file: str | None = None,
             failure_output_file: str | None = None) -> bool:
         """Execute selected declaration bindings and publish summary plus archive."""
+        self.last_outcome = "success"
         run_directory = None
         summaries: list[dict[str, Any]] = []
         current_system: str | None = None
         try:
             declaration_path = Path(declaration_file).expanduser().resolve()
             if not declaration_path.is_file():
-                raise FileNotFoundError(f"experiment declaration is missing: {declaration_path}")
+                raise FileNotFoundError(
+                    f"experiment declaration is missing: {declaration_path}")
             manifest_path = input_file(str(self._shared), manifest_file)
             environment_selection = _environment_system_selection(
                 selected_systems_env
@@ -641,22 +637,27 @@ class RdfExperimentMatrixResource:
                 declaration_path, manifest_path, adapter_options,
                 adapter_option_env, selected_systems=selection,
             )
-            experiments, original_artifacts = load_rdf_experiment_declaration(declaration_path)
+            experiments, original_artifacts = load_rdf_experiment_declaration(
+                declaration_path)
             experiments = _selected_experiments(experiments, selection)
-            artifacts = _stage_artifacts(declaration_path, original_artifacts, self._shared)
+            artifacts = _stage_artifacts(
+                declaration_path, original_artifacts, self._shared)
             specifications = {
                 item.system_id: item for item in system_adapter_specifications()
             }
             options = {} if adapter_options is None else dict(adapter_options)
-            environment_options = _environment_adapter_options(adapter_option_env)
+            environment_options = _environment_adapter_options(
+                adapter_option_env)
             for system_id, values in environment_options.items():
                 merged = dict(options.get(system_id, {}))
                 merged.update(values)
                 options[system_id] = merged
             unknown = sorted(set(options).difference(specifications))
             if unknown:
-                raise ValueError("adapter_options contains unknown systems: " + ", ".join(unknown))
-            run_directory = Path(tempfile.mkdtemp(prefix="rdf-matrix-", dir=self._shared))
+                raise ValueError(
+                    "adapter_options contains unknown systems: " + ", ".join(unknown))
+            run_directory = Path(tempfile.mkdtemp(
+                prefix="rdf-matrix-", dir=self._shared))
             summaries = []
             for experiment in experiments:
                 system_id = experiment.system_configuration
@@ -664,25 +665,31 @@ class RdfExperimentMatrixResource:
                 specification = specifications[system_id]
                 representation = specification.configuration.representation
                 artifact = artifacts[representation]
-                output_path = run_directory / (system_id.replace("/", "--") + ".jsonl")
-                module_name, separator, class_name = specification.adapter.partition(":")
+                output_path = run_directory / \
+                    (system_id.replace("/", "--") + ".jsonl")
+                module_name, separator, class_name = specification.adapter.partition(
+                    ":")
                 if not separator:
-                    raise ValueError(f"invalid adapter path: {specification.adapter}")
+                    raise ValueError(
+                        f"invalid adapter path: {specification.adapter}")
                 module = __import__(module_name, fromlist=[class_name])
                 adapter_class = getattr(module, class_name)
                 adapter = None
                 if specification.configuration.kind == "server":
                     arguments = _constructor_arguments(
                         adapter_class, artifact, str(self._data_path),
-                        str(self._config_path), str(self._directory), self._verbose,
-                        specification.configuration, options.get(system_id, {}),
+                        str(self._config_path), str(
+                            self._directory), self._verbose,
+                        specification.configuration, options.get(
+                            system_id, {}),
                     )
                     adapter = adapter_class(**arguments)
                     benchmark = SparqlHttpBenchmark(
                         str(self._data_path), str(self._config_path),
                         str(self._directory), self._verbose,
                     )
-                    relative_output = output_path.relative_to(self._shared).as_posix()
+                    relative_output = output_path.relative_to(
+                        self._shared).as_posix()
                     policy = experiment.execution_policy
                     lifecycle = adapter.run(lambda endpoint: benchmark.execute(
                         endpoint=endpoint,
@@ -721,7 +728,8 @@ class RdfExperimentMatrixResource:
                     if "vortex_layout" in specification.parameters:
                         query_parameters["vortex_layout"] = specification.parameters["vortex_layout"]
                     if not query.execute(**query_parameters):
-                        raise RuntimeError(f"RDFLib-backed execution failed for {system_id}")
+                        raise RuntimeError(
+                            f"RDFLib-backed execution failed for {system_id}")
                 elif specification.configuration.kind == "file-backed":
                     adapter = adapter_class(**dict(options.get(system_id, {})))
                     _run_file_backed(
@@ -729,16 +737,46 @@ class RdfExperimentMatrixResource:
                         manifest_path, output_path, experiment, system_id,
                     )
                 else:
-                    raise ValueError(f"no generic execution strategy for {system_id}")
+                    raise ValueError(
+                        f"no generic execution strategy for {system_id}")
+                summary = _result_summary(
+                    output_path, experiment, representation
+                )
+                summary["success_count"] = (
+                    summary["record_count"] - summary["failure_count"]
+                )
+                summary["status"] = (
+                    "ok" if summary["failure_count"] == 0
+                    else "completed_with_failures"
+                )
                 _compact_result_file(output_path)
-                summaries.append(_result_summary(output_path, experiment, representation))
+                summaries.append(summary)
+                if summary["failure_count"]:
+                    self.last_outcome = "partial"
+                    self._logger.warning(
+                        f"{system_id} completed with "
+                        f"{summary['failure_count']} failed query attempts"
+                    )
 
-            summary_path = resolve_shared_path(str(self._shared), results_file, "Output")
-            archive_path = resolve_shared_path(str(self._shared), output_file, "Output")
-            _publish_result_bundle(
-                run_directory, summary_path, archive_path, summaries, "ok"
+            summary_path = resolve_shared_path(
+                str(self._shared), results_file, "Output")
+            archive_path = resolve_shared_path(
+                str(self._shared), output_file, "Output")
+            query_failure_count = sum(
+                summary["failure_count"] for summary in summaries
             )
-            self._logger.info(f"Completed {len(summaries)} RDF experiment bindings")
+            matrix_status = (
+                "ok" if query_failure_count == 0
+                else "completed_with_failures"
+            )
+            _publish_result_bundle(
+                run_directory, summary_path, archive_path, summaries,
+                matrix_status,
+            )
+            self._logger.info(
+                f"Completed {len(summaries)} RDF experiment bindings; "
+                f"query_failures={query_failure_count}"
+            )
             return True
         except Exception as error:
             message = f"{type(error).__name__}: {error}"

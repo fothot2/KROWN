@@ -15,6 +15,7 @@ ARG COMUNICA_HDT_VERSION=5.0.1
 WORKDIR /opt/comunica-hdt
 COPY --from=build --chown=node:node /opt/comunica-hdt/package.json /opt/comunica-hdt/package-lock.json ./
 COPY --from=build --chown=node:node /opt/comunica-hdt/node_modules ./node_modules
+COPY --chown=node:node persistent-worker.js ./persistent-worker.js
 RUN test "$(node -p "require('./node_modules/@comunica/query-sparql-hdt/package.json').version")" = "$COMUNICA_HDT_VERSION" \
  && test -x ./node_modules/.bin/comunica-sparql-hdt
 USER node

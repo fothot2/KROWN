@@ -27,6 +27,7 @@ SCHEMA_FILE = 'metadata.schema'
 CONFIG_DIR = os.path.join(os.path.dirname(__file__), 'config')
 WAIT_TIME = 15  # seconds
 CHECKPOINT_FILE_NAME = '.done'
+PARTIAL_CHECKPOINT_FILE_NAME = '.partial'
 
 
 def _declared_artifact_path(shared_directory: str,
@@ -292,7 +293,7 @@ class Executor:
                 commands = self._resources_all_commands_by_name(r)
                 if commands is None or step['command'] not in commands:
                     msg = f'{path}: Unknown command "{step["command"]}" ' + \
-                          f'for resource "{step["resource"]}"'
+                        f'for resource "{step["resource"]}"'
                     self._logger.error(msg)
                     return False
 
@@ -306,8 +307,8 @@ class Executor:
                 for p in step['parameters'].keys():
                     if p not in parameters:
                         msg = f'{path}: Unkown parameter "{p}" for ' + \
-                              f'command "{step["command"]}" of resource ' + \
-                              f'"{step["resource"]}"'
+                            f'command "{step["command"]}" of resource ' + \
+                            f'"{step["resource"]}"'
                         self._logger.error(msg)
                         return False
 
@@ -319,8 +320,8 @@ class Executor:
                 for p in parameters:
                     if p not in step['parameters'].keys():
                         msg = f'{path}: Missing required parameter "{p}" ' + \
-                              f'for command "{step["command"]}" ' + \
-                              f'of resource "{step["resource"]}"'
+                            f'for command "{step["command"]}" ' + \
+                            f'of resource "{step["resource"]}"'
                         self._logger.error(msg)
                         return False
 
@@ -439,6 +440,7 @@ class Executor:
             Whether the case was executed successfully or not.
         """
         run_success = True
+        run_partial = False
         data = case['data']
         directory = case['directory']
         data_path = os.path.join(directory, 'data')
@@ -508,24 +510,32 @@ class Executor:
                 step_success = False
                 run_success = False
                 msg = f'Executing command "{step["command"]}" ' + \
-                      f'failed for resource "{step["resource"]}"'
+                    f'failed for resource "{step["resource"]}"'
                 # Some steps are non-critical like queries, they may fail but
                 # should not cause a complete case failure. Allow these
                 # failures if the may_fail key is present
                 if step.get('may_fail', False):
                     self._logger.warning(msg)
-                    self._progress_cb(step['resource'], step['name'], step_success)
+                    self._progress_cb(
+                        step['resource'], step['name'],
+                        getattr(resource, 'last_outcome', step_success),
+                    )
                     continue
                 else:
                     self._logger.error(msg)
-                    self._progress_cb(step['resource'], step['name'], step_success)
+                    self._progress_cb(
+                        step['resource'], step['name'],
+                        getattr(resource, 'last_outcome', step_success),
+                    )
                     break
             self._logger.debug(f'Command "{step["command"]}" executed on '
                                f'resource {step["resource"]}')
 
             # Step complete
-            self._progress_cb(step['resource'], step['name'], step_success)
-
+            step_outcome = getattr(resource, 'last_outcome', step_success)
+            if step_outcome == 'partial':
+                run_partial = True
+            self._progress_cb(step['resource'], step['name'], step_outcome)
             # Step finished, let metric collector know
             if (index + 1) < len(data['steps']):
                 collector.next_step()
@@ -542,7 +552,7 @@ class Executor:
         self._progress_cb('Cleaner', 'Clean up resources', True)
 
         # Mark checkpoint if necessary
-        if checkpoint and run_success:
+        if checkpoint and run_success and not run_partial:
             self._logger.debug('Writing checkpoint...')
             with open(checkpoint_file, 'w') as f:
                 d = datetime.now().replace(microsecond=0).isoformat()
@@ -557,7 +567,7 @@ class Executor:
         # Metrics measurements
         for metrics_file in glob(f'{data_path}/*/{METRICS_FILE_NAME}'):
             subdir = metrics_file.replace(f'{data_path}/', '') \
-                    .replace('/METRICS_FILE_NAME', '')
+                .replace('/METRICS_FILE_NAME', '')
             os.makedirs(os.path.join(results_run_path, subdir), exist_ok=True)
             shutil.move(metrics_file, os.path.join(results_run_path, subdir,
                                                    METRICS_FILE_NAME))
@@ -589,10 +599,18 @@ class Executor:
                         parameters['output_file'],
                     )
 
-            # Run complete, mark it
-            run_checkpoint_file = os.path.join(results_run_path,
-                                               CHECKPOINT_FILE_NAME)
-            self._logger.debug('Writing run checkpoint...')
+            # Record a clean or partial completed run.
+            checkpoint_name = (
+                PARTIAL_CHECKPOINT_FILE_NAME if run_partial
+                else CHECKPOINT_FILE_NAME
+            )
+            run_checkpoint_file = os.path.join(
+                results_run_path, checkpoint_name
+            )
+            self._logger.debug(
+                'Writing partial run checkpoint...'
+                if run_partial else 'Writing run checkpoint...'
+            )
             with open(run_checkpoint_file, 'w') as f:
                 d = datetime.now().replace(microsecond=0).isoformat()
                 f.write(f'{d}\n')
@@ -602,7 +620,7 @@ class Executor:
                           True)
         sleep(WAIT_TIME)
 
-        return run_success
+        return run_success and not run_partial
 
     def list(self) -> list:
         """List all cases in a root directory.

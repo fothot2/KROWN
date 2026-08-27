@@ -340,7 +340,7 @@ def download_challenge():
           f'--root={extraction_path}\'')
 
 
-def progress_cb(resource: str, name: str, success: bool):
+def progress_cb(resource: str, name: str, outcome):
     """Progress callback
 
     Pretty print the current progress.
@@ -354,7 +354,9 @@ def progress_cb(resource: str, name: str, success: bool):
     success : bool
         Whether the execution was succesfull or not.
     """
-    if success:
+    if outcome == 'partial':
+        print(f'        ⚠️  {resource: <20}: {name: <50}')
+    elif outcome:
         print(f'        ✅ {resource: <20}: {name: <50}')
     else:
         print(f'        ❌ {resource: <20}: {name: <50}')

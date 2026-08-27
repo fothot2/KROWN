@@ -31,8 +31,11 @@ def audit_repository(root: Path, benchmarks_root: Path) -> dict[str, Any]:
 
     expected = set(GENERIC_RESOURCES)
     bsbm_resources = [step['resource'] for step in metadata['bsbm']['steps']]
-    if bsbm_resources != list(GENERIC_RESOURCES):
-        raise ValueError('BSBM must compose the four generic RDF resources in order')
+    expected_bsbm_resources = ['RdfManifestResource', 'RdfExperimentMatrixResource', 'RdfExperimentMatrixResource']
+    if ('steps' in metadata and             [step['resource'] for step in metadata['steps']] != expected_bsbm_resources):
+        raise ValueError(
+            'BSBM must compose manifest, matrix preflight, and matrix execution in order'
+        )
 
     dbbench_resources = {step['resource'] for step in metadata['dbbench']['steps']}
     required_dbbench = {
@@ -53,11 +56,18 @@ def audit_repository(root: Path, benchmarks_root: Path) -> dict[str, Any]:
                 raise ValueError(f'{name} embeds generation or download in KROWN')
 
     bsbm = metadata['bsbm']['steps']
-    staged = bsbm[1]['parameters']['destination_file']
-    if bsbm[2]['parameters']['dataset_file'] != staged or bsbm[3]['parameters']['dataset_file'] != staged:
-        raise ValueError('BSBM stage, execute, and validate paths differ')
-    if bsbm[2]['parameters']['large_workload_env'] != 'KROWN_RDF_ALLOW_LARGE_WORKLOAD':
-        raise ValueError('BSBM does not use the neutral large-workload guard')
+    preflight = bsbm[1]
+    execute = bsbm[2]
+    if preflight['command'] != 'preflight' or execute['command'] != 'execute':
+        raise ValueError('BSBM matrix steps must preflight before execution')
+    shared_parameters = ('declaration_file', 'manifest_file')
+    for parameter in shared_parameters:
+        if preflight['parameters'].get(parameter) != execute['parameters'].get(parameter):
+            raise ValueError(
+                f'BSBM matrix {parameter} differs between preflight and execution'
+            )
+    if execute['parameters'].get('selected_systems_env') != 'KROWN_RDF_MATRIX_SYSTEMS':
+        raise ValueError('BSBM does not use the generic matrix system selector')
 
     dbbench_execute = next(step for step in metadata['dbbench']['steps']
                            if step['resource'] == 'RdfQueryResource')

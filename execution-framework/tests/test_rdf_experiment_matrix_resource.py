@@ -81,6 +81,13 @@ class RdfExperimentMatrixResourceTests(unittest.TestCase):
             summary=_result_summary(path,experiment,'custom/default')
             self.assertEqual(summary['record_count'],2); self.assertEqual(summary['failure_count'],1); self.assertNotIn('sha256',summary); self.assertNotIn('experiment_id',summary)
 
+    def test_matrix_continues_after_failed_query_attempts(self):
+        source = (Path(__file__).resolve().parents[1] / "bench_executor/rdf_experiment_matrix_resource.py").read_text()
+        self.assertIn('else "completed_with_failures"', source)
+        self.assertIn('self.last_outcome = "partial"', source)
+        self.assertIn('query_failures={query_failure_count}', source)
+        self.assertNotIn('raise RuntimeError(\n                        f"{system_id} produced "', source)
+
     def test_environment_options_reject_placeholders(self):
         self.assertEqual(_require_concrete_runtime_value('qlever index', 'command'), 'qlever index')
         for value in ('<validated command>', 'TODO', 'replace-me'):
@@ -153,6 +160,19 @@ class RdfExperimentMatrixResourceTests(unittest.TestCase):
             ),
             ["c/three", "a/one"],
         )
+
+    def test_comunica_worker_keeps_hash_inside_iris(self):
+        root = Path(__file__).resolve().parents[1]
+        worker = (root / "dockers/ComunicaHDT/persistent-worker.js").read_text()
+        self.assertIn("function withoutComments(query)", worker)
+        self.assertIn('character === "<"', worker)
+        self.assertNotIn("query.replace(/#[^\\r\\n]*/g", worker)
+
+    def test_comunica_worker_keeps_declared_projection(self):
+        root = Path(__file__).resolve().parents[1]
+        worker = (root / "dockers/ComunicaHDT/persistent-worker.js").read_text()
+        self.assertIn("function projectedVariables(query)", worker)
+        self.assertIn("declaredVariables.length > 0", worker)
 
 
 if __name__ == '__main__':

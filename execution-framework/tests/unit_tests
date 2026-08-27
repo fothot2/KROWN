@@ -1545,12 +1545,14 @@ class UnitTests(unittest.TestCase):
         path = Path(__file__).resolve().parents[2] / 'benchmark-integration/bsbm-smoke/metadata.json'
         metadata = json.loads(path.read_text(encoding='utf-8'))
         self.assertEqual([step['resource'] for step in metadata['steps']], [
-            'RdfManifestResource', 'ExternalRdfDatasetResource', 'RdfQueryResource',
-            'RdfBaselineResource'])
-        self.assertEqual(metadata['steps'][2]['parameters']['benchmark'], 'bsbm')
-        self.assertEqual(metadata['steps'][0]['parameters']['input_env'], 'KROWN_BSBM_QUERY_STREAM')
-        self.assertEqual(metadata['steps'][0]['parameters']['adapter_options'], {'--selection': 'smoke'})
-
+            'RdfManifestResource', 'RdfExperimentMatrixResource',
+            'RdfExperimentMatrixResource'])
+        self.assertEqual(metadata['steps'][1]['command'], 'preflight')
+        self.assertEqual(metadata['steps'][2]['command'], 'execute')
+        self.assertEqual(
+            metadata['steps'][2]['parameters']['selected_systems_env'],
+            'KROWN_RDF_MATRIX_SYSTEMS',
+        )
 
     def test_bsbm_baseline_records_real_smoke_semantics(self):
         root = Path(__file__).resolve().parents[2]
@@ -2010,6 +2012,14 @@ class UnitTests(unittest.TestCase):
             files=(ArtifactFile('dataset.nt', 10, 'a' * 64),),
             producer={'tool': 'external'},
         )
+
+    def test_executor_preserves_partial_results_without_done_checkpoint(self):
+        source = (Path(__file__).resolve().parents[1] /
+                  'bench_executor/executor.py').read_text(encoding='utf-8')
+        self.assertIn("PARTIAL_CHECKPOINT_FILE_NAME = '.partial'", source)
+        self.assertIn("if step_outcome == 'partial':", source)
+        self.assertIn('return run_success and not run_partial', source)
+        self.assertIn('PARTIAL_CHECKPOINT_FILE_NAME if run_partial', source)
 
     def test_experiment_matrix_binds_logical_and_physical_identity(self):
         artifact = self._matrix_artifact('hdt/default')
@@ -2592,9 +2602,23 @@ class UnitTests(unittest.TestCase):
         self.assertEqual(adapter.system_id, 'comunica/hdt')
         self.assertEqual(adapter.representation, 'hdt/default')
         self.assertEqual(adapter.lifecycle, ('prepare', 'execute', 'collect'))
-        command = adapter.query_command(container_artifact='/data/dataset.hdt', query='SELECT * WHERE { ?s ?p ?o } LIMIT 1')
-        self.assertEqual(command[:2], ['comunica-sparql-hdt', 'hdt@/data/dataset.hdt'])
-        self.assertEqual(command[-2:], ['-t', 'application/sparql-results+json'])
+        with tempfile.TemporaryDirectory() as directory:
+            artifact = Path(directory) / 'dataset.hdt'
+            artifact.write_bytes(b'hdt')
+            command = adapter.worker_command(
+                host_artifact=artifact,
+                container_name='KROWN-Comunica-unit-test',
+                container_artifact='/data/dataset.hdt',
+            )
+        self.assertEqual(command[:2], ['docker', 'run'])
+        self.assertIn('--interactive', command)
+        self.assertIn('--network', command)
+        self.assertIn('none', command)
+        self.assertIn('KROWN-Comunica-unit-test', command)
+        self.assertIn('dtaikg/comunica-hdt:v5.0.1', command)
+        self.assertEqual(command[-2:], [
+            '/opt/comunica-hdt/persistent-worker.js', '/data/dataset.hdt'
+        ])
 
     def test_comunica_hdt_docker_context_is_pinned(self):
         root = Path(__file__).resolve().parents[1]

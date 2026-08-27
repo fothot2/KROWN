@@ -557,7 +557,7 @@ directory and mount point, which satisfies the upstream entrypoint contract.
 The Oxigraph 0.5.9 builder installs the Clang and CMake toolchain required by
 the RocksDB bindings. Build the image explicitly before matrix preflight.
 
-### Staged RDF matrix execution
+### Selected RDF matrix execution
 
 The external declaration remains the complete benchmark intent. Runtime selection
 is optional and generic. Set `KROWN_RDF_MATRIX_SYSTEMS` to a comma-separated list
@@ -579,14 +579,14 @@ Preflight validates the query manifest, declarations, receipts, adapter imports,
 Python modules, local images, ports, and stale matrix-owned containers. It does
 not start a container, load data, build an index, or execute SPARQL.
 
-### Compact Stage 1 matrix results
+### Persistent JSON Lines query workers
 
-`run_rdf_matrix_stage1.py` executes Comunica HDT, pycottas, Vortex-RDF, and
-RDFLib in declaration order. It writes `raw/bsbm-stage1-summary.json` and
-`raw/bsbm-stage1-results.tar.gz`. If a later system fails, it keeps completed
-compact JSONL files in the separate `bsbm-stage1-failed-*` diagnostic outputs.
+A file-backed adapter can provide one reusable JSON Lines worker. KROWN starts one worker per workload, keeps process and source initialization outside query timing, consumes each complete result, and enforces the declared timeout. The execution framework contains no benchmark-specific stage runner.
 
-Matrix JSONL keeps query ID, phase, run, status, measured time, result count,
-and result fingerprint. Error type and message occur only on failures. Input
-validation still uses receipt and manifest hashes, but query rows and compact
-summaries do not repeat them.
+### Partial experiment runs
+
+A query-level failure does not stop later queries or systems. KROWN preserves
+results, logs, and metrics, and shows a warning for the affected matrix step.
+The run receives `.partial`, not `.done`, and the command returns a non-success
+status after cleanup and artifact collection. Structural failures still stop
+the matrix.
