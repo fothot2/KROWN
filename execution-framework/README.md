@@ -590,3 +590,21 @@ results, logs, and metrics, and shows a warning for the affected matrix step.
 The run receives `.partial`, not `.done`, and the command returns a non-success
 status after cleanup and artifact collection. Structural failures still stop
 the matrix.
+
+### BSBM HTTP-server stage
+
+`run_rdf_matrix_http.py` executes the four SPARQL HTTP configurations through
+the generic RDF experiment matrix resource. It selects Fuseki, Virtuoso,
+Oxigraph memory, and Oxigraph RocksDB in declaration order. Each adapter owns
+its existing load, readiness, query, collection, stop, and cleanup lifecycle.
+
+Successful and structurally failed attempts use separate output paths:
+
+- `raw/bsbm-http-summary.json`
+- `raw/bsbm-http-results.tar.gz`
+- `raw/bsbm-http-failed-summary.json`
+- `raw/bsbm-http-failed-results.tar.gz`
+
+Query-level failures remain compact result records. They do not stop later
+queries or systems. Structural lifecycle failures return a non-success status
+and preserve available diagnostics.
