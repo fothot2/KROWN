@@ -451,6 +451,76 @@ def _run_file_backed(
     return True
 
 
+_COMPACT_RESULT_FIELDS = (
+    "query_id", "phase", "run", "status", "elapsed_ns",
+    "result_count", "result_fingerprint",
+)
+
+
+def _compact_result_record(record: Mapping[str, Any]) -> dict[str, Any]:
+    """Keep only fields needed for timing and semantic comparison."""
+    missing = [name for name in _COMPACT_RESULT_FIELDS if name not in record]
+    if missing:
+        raise ValueError("result record misses compact fields: " + ", ".join(missing))
+    compact = {name: record[name] for name in _COMPACT_RESULT_FIELDS}
+    if record["status"] != "ok":
+        for name in ("error_type", "error_message"):
+            value = record.get(name)
+            if value is not None:
+                compact[name] = value
+    return compact
+
+
+def _compact_result_file(path: Path) -> None:
+    """Replace one validated matrix JSONL file with its compact form."""
+    records = []
+    with path.open(encoding="utf-8") as stream:
+        for line_number, line in enumerate(stream, 1):
+            if not line.strip():
+                continue
+            try:
+                records.append(_compact_result_record(json.loads(line)))
+            except (json.JSONDecodeError, TypeError, ValueError) as error:
+                raise ValueError(f"cannot compact result line {line_number}: {error}") from error
+    if not records:
+        raise ValueError(f"empty result artifact: {path}")
+    temporary = path.with_name(f".{path.name}.compact.tmp")
+    try:
+        with temporary.open("w", encoding="utf-8") as stream:
+            for record in records:
+                stream.write(json.dumps(record, separators=(",", ":"), allow_nan=False))
+                stream.write("\n")
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _publish_result_bundle(
+        run_directory: Path, summary_path: Path, archive_path: Path,
+        experiments: list[dict[str, Any]], status: str,
+        failed_system: str | None = None, error: str | None = None) -> None:
+    """Publish one compact atomic summary and archive."""
+    summary = {"status": status, "experiments": experiments}
+    if failed_system is not None:
+        summary["failed_system"] = failed_system
+    if error is not None:
+        summary["error"] = error
+    summary_temporary = temporary_output(summary_path)
+    archive_temporary = temporary_output(archive_path)
+    try:
+        _atomic_json(summary_temporary, summary)
+        with tarfile.open(archive_temporary, "w:gz") as archive:
+            for path in sorted(run_directory.glob("*.jsonl")):
+                archive.add(path, arcname=path.name, recursive=False)
+        commit_output(summary_temporary, summary_path)
+        summary_temporary = None
+        commit_output(archive_temporary, archive_path)
+        archive_temporary = None
+    finally:
+        discard_output(summary_temporary)
+        discard_output(archive_temporary)
+
+
 def _result_summary(path: Path, experiment, representation: str) -> dict[str, Any]:
     records = []
     with path.open(encoding="utf-8") as stream:
@@ -465,13 +535,11 @@ def _result_summary(path: Path, experiment, representation: str) -> dict[str, An
     failures = sum(row.get("status") not in {"ok", "skipped", "unsupported"}
                    for row in records)
     return {
-        "experiment_id": experiment.experiment_id,
         "system": experiment.system_configuration,
         "representation": representation,
         "record_count": len(records),
         "failure_count": failures,
         "result_file": path.name,
-        "sha256": _sha256(path),
     }
 
 
@@ -549,10 +617,13 @@ class RdfExperimentMatrixResource:
             adapter_options: Mapping[str, Mapping[str, Any]] | None = None,
             adapter_option_env: Mapping[str, Mapping[str, str]] | None = None,
             selected_systems: list[str] | None = None,
-            selected_systems_env: str | None = None) -> bool:
+            selected_systems_env: str | None = None,
+            failure_results_file: str | None = None,
+            failure_output_file: str | None = None) -> bool:
         """Execute selected declaration bindings and publish summary plus archive."""
-        summary_temporary = archive_temporary = None
         run_directory = None
+        summaries: list[dict[str, Any]] = []
+        current_system: str | None = None
         try:
             declaration_path = Path(declaration_file).expanduser().resolve()
             if not declaration_path.is_file():
@@ -589,6 +660,7 @@ class RdfExperimentMatrixResource:
             summaries = []
             for experiment in experiments:
                 system_id = experiment.system_configuration
+                current_system = system_id
                 specification = specifications[system_id]
                 representation = specification.configuration.representation
                 artifact = artifacts[representation]
@@ -658,34 +730,38 @@ class RdfExperimentMatrixResource:
                     )
                 else:
                     raise ValueError(f"no generic execution strategy for {system_id}")
+                _compact_result_file(output_path)
                 summaries.append(_result_summary(output_path, experiment, representation))
 
             summary_path = resolve_shared_path(str(self._shared), results_file, "Output")
             archive_path = resolve_shared_path(str(self._shared), output_file, "Output")
-            summary_temporary = temporary_output(summary_path)
-            _atomic_json(summary_temporary, {
-                "schema": SUMMARY_SCHEMA,
-                "declaration_sha256": _sha256(declaration_path),
-                "manifest_sha256": _sha256(manifest_path),
-                "experiments": summaries,
-            })
-            archive_temporary = temporary_output(archive_path)
-            with tarfile.open(archive_temporary, "w:gz") as archive:
-                for path in sorted(run_directory.glob("*.jsonl")):
-                    archive.add(path, arcname=path.name, recursive=False)
-            commit_output(summary_temporary, summary_path)
-            summary_temporary = None
-            commit_output(archive_temporary, archive_path)
-            archive_temporary = None
+            _publish_result_bundle(
+                run_directory, summary_path, archive_path, summaries, "ok"
+            )
             self._logger.info(f"Completed {len(summaries)} RDF experiment bindings")
             return True
         except Exception as error:
-            self._logger.error(
-                f"RDF experiment matrix failed: {type(error).__name__}: {error}"
-            )
+            message = f"{type(error).__name__}: {error}"
+            self._logger.error(f"RDF experiment matrix failed: {message}")
+            if (run_directory is not None and failure_results_file is not None
+                    and failure_output_file is not None):
+                try:
+                    failure_summary = resolve_shared_path(
+                        str(self._shared), failure_results_file, "Output"
+                    )
+                    failure_archive = resolve_shared_path(
+                        str(self._shared), failure_output_file, "Output"
+                    )
+                    _publish_result_bundle(
+                        run_directory, failure_summary, failure_archive, summaries,
+                        "failed", current_system, message,
+                    )
+                except Exception as publish_error:
+                    self._logger.error(
+                        "Failed to publish matrix diagnostics: "
+                        f"{type(publish_error).__name__}: {publish_error}"
+                    )
             return False
         finally:
-            discard_output(summary_temporary)
-            discard_output(archive_temporary)
             if run_directory is not None:
                 shutil.rmtree(run_directory, ignore_errors=True)

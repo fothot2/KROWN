@@ -11,6 +11,8 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from bench_executor.experiment_matrix_contract import ArtifactFile, DatasetArtifact, SystemConfiguration
 from bench_executor.rdf_experiment_matrix_resource import (
+    _compact_result_file,
+    _compact_result_record,
     _constructor_arguments,
     _environment_adapter_options,
     _require_concrete_runtime_value,
@@ -49,12 +51,35 @@ class RdfExperimentMatrixResourceTests(unittest.TestCase):
             staged=_stage_artifacts(path,{'custom/default':artifact},shared)['custom/default']; target=shared/staged.files[0].path
             self.assertEqual(target.read_bytes(),b'payload'); self.assertTrue(source.is_file())
 
+    def test_compact_result_keeps_only_useful_fields(self):
+        record = {
+            "query_id": "q1", "phase": "measured", "run": 0,
+            "status": "ok", "elapsed_ns": 7, "result_count": 2,
+            "result_fingerprint": "f", "query_sha256": "x" * 64,
+            "client_elapsed_ns": 9, "result_variables": ["x"],
+        }
+        self.assertEqual(set(_compact_result_record(record)), {
+            "query_id", "phase", "run", "status", "elapsed_ns",
+            "result_count", "result_fingerprint",
+        })
+
+    def test_compact_result_keeps_errors_only_on_failure(self):
+        record = {
+            "query_id": "q1", "phase": "measured", "run": 0,
+            "status": "engine_error", "elapsed_ns": 7, "result_count": None,
+            "result_fingerprint": None, "error_type": "RuntimeError",
+            "error_message": "failed",
+        }
+        compact = _compact_result_record(record)
+        self.assertEqual(compact["error_type"], "RuntimeError")
+        self.assertEqual(compact["error_message"], "failed")
+
     def test_result_summary_reports_failures_and_hash(self):
         with tempfile.TemporaryDirectory() as directory:
             path=Path(directory)/'results.jsonl'; path.write_text(json.dumps({'status':'ok'})+'\n'+json.dumps({'status':'engine_error'})+'\n')
             experiment=SimpleNamespace(experiment_id='sample/run/system',system_configuration='system/default')
             summary=_result_summary(path,experiment,'custom/default')
-            self.assertEqual(summary['record_count'],2); self.assertEqual(summary['failure_count'],1); self.assertEqual(len(summary['sha256']),64)
+            self.assertEqual(summary['record_count'],2); self.assertEqual(summary['failure_count'],1); self.assertNotIn('sha256',summary); self.assertNotIn('experiment_id',summary)
 
     def test_environment_options_reject_placeholders(self):
         self.assertEqual(_require_concrete_runtime_value('qlever index', 'command'), 'qlever index')

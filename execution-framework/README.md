@@ -578,3 +578,15 @@ python execution-framework/preflight_rdf_matrix.py \
 Preflight validates the query manifest, declarations, receipts, adapter imports,
 Python modules, local images, ports, and stale matrix-owned containers. It does
 not start a container, load data, build an index, or execute SPARQL.
+
+### Compact Stage 1 matrix results
+
+`run_rdf_matrix_stage1.py` executes Comunica HDT, pycottas, Vortex-RDF, and
+RDFLib in declaration order. It writes `raw/bsbm-stage1-summary.json` and
+`raw/bsbm-stage1-results.tar.gz`. If a later system fails, it keeps completed
+compact JSONL files in the separate `bsbm-stage1-failed-*` diagnostic outputs.
+
+Matrix JSONL keeps query ID, phase, run, status, measured time, result count,
+and result fingerprint. Error type and message occur only on failures. Input
+validation still uses receipt and manifest hashes, but query rows and compact
+summaries do not repeat them.
