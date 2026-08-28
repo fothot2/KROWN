@@ -127,6 +127,32 @@ class UnitTests(unittest.TestCase):
             'Starting container "Test" timed out!'
         )
 
+    def test_fuseki_uses_embedded_logging_configuration(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(
+                Container, '__init__', return_value=None) as container_init:
+            data = os.path.join(directory, 'data')
+            config = os.path.join(directory, 'config')
+            log = os.path.join(directory, 'log')
+            Fuseki(data, config, log, False)
+
+        container_init.assert_called_once()
+        arguments = container_init.call_args
+        self.assertEqual(arguments.args[0], 'kgconstruct/fuseki:v6.2.0')
+        self.assertEqual(arguments.args[1], 'Fuseki')
+        self.assertIsInstance(arguments.args[2], Logger)
+        self.assertNotIn(
+                'log4j2.properties',
+                repr(arguments),
+            )
+        self.assertEqual(arguments.kwargs['ports'], {'3030': '3030'})
+        volumes = arguments.kwargs['volumes']
+        self.assertEqual(volumes, [
+            f'{os.path.abspath(data)}/shared:/data',
+            f'{os.path.abspath(data)}/fuseki:/fuseki/databases/DB',
+        ])
+        self.assertFalse(any('log4j2.properties' in volume
+                             for volume in volumes))
+
     def test_fuseki_cleanup_data_restores_host_ownership(self):
         with tempfile.TemporaryDirectory() as directory:
             database = os.path.join(directory, 'fuseki')
