@@ -12,7 +12,7 @@ def system_configuration():
  return SystemConfiguration(system="rdflib",configuration="default",kind="embedded",representation=REPRESENTATION,parameters={"image":IMAGE,"rdflib_version":RDFLIB_VERSION,"store":"default"})
 
 def adapter_specification():
- return SystemAdapterSpecification(configuration=system_configuration(),adapter="bench_executor.rdflib_system_adapter:RdfLibSystemAdapter",capabilities=LifecycleCapabilities.for_kind("embedded"),parameters={"engine":"default"})
+ return SystemAdapterSpecification(configuration=system_configuration(),adapter="bench_executor.rdflib_system_adapter:RdfLibSystemAdapter",capabilities=LifecycleCapabilities.for_kind("embedded"),parameters={"engine":"default","execution_strategy":"rdflib-worker"})
 
 class RdfLibSystemAdapter:
  def __init__(self,artifact:DatasetArtifact,data_path:str|Path):

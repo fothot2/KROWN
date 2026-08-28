@@ -85,6 +85,7 @@ class VortexRdfRuntimeConfiguration:
                 "engine": "vortex",
                 "vortex_layout": self.store_layout,
                 "backend": self.backend,
+                "execution_strategy": "rdflib-worker",
             },
         )
 

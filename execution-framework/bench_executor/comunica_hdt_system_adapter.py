@@ -34,4 +34,4 @@ def system_configuration():
     return SystemConfiguration(system="comunica",configuration="hdt",kind="file-backed",representation=REPRESENTATION,parameters={"image":IMAGE,"package":PACKAGE,"package_version":PACKAGE_VERSION,"node_version":NODE_VERSION,"worker_protocol":"jsonl-v1"})
 def adapter_specification():
     from bench_executor.system_adapter_contract import LifecycleCapabilities,SystemAdapterSpecification
-    return SystemAdapterSpecification(configuration=system_configuration(),adapter="bench_executor.comunica_hdt_system_adapter:ComunicaHdtSystemAdapter",capabilities=LifecycleCapabilities.for_kind("file-backed"),parameters={"engine":"persistent-jsonl"})
+    return SystemAdapterSpecification(configuration=system_configuration(),adapter="bench_executor.comunica_hdt_system_adapter:ComunicaHdtSystemAdapter",capabilities=LifecycleCapabilities.for_kind("file-backed"),parameters={"engine":"persistent-jsonl","execution_strategy":"persistent-jsonl"})

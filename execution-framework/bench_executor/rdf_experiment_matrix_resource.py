@@ -204,13 +204,28 @@ def _runtime_preflight(
                 )
         configuration = specification.configuration
         artifact = artifacts[configuration.representation]
-        if configuration.kind == "server":
+        strategy = _execution_strategy(specification)
+        if strategy == "sparql-http":
+            if configuration.kind != "server":
+                raise ValueError(
+                    f"SPARQL HTTP strategy requires server kind: {system_id}"
+                )
             _constructor_arguments(
                 adapter_class, artifact, "/preflight/data", "/preflight/config",
                 "/preflight/log", False, configuration, supplied,
             )
-        engine = specification.parameters.get("engine")
-        if engine in _ENGINE_MODULES:
+        elif strategy == "persistent-jsonl":
+            if configuration.kind != "file-backed":
+                raise ValueError(
+                    f"persistent JSONL strategy requires file-backed kind: {system_id}"
+                )
+            for method in ("worker_command", "force_stop_command"):
+                if not callable(getattr(adapter_class, method, None)):
+                    raise TypeError(f"{system_id} adapter misses {method}")
+        elif strategy == "rdflib-worker":
+            engine = specification.parameters.get("engine")
+            if engine not in _ENGINE_MODULES:
+                raise ValueError(f"unsupported RDFLib engine for {system_id}: {engine}")
             modules.add(_ENGINE_MODULES[engine])
         image = supplied.get("image") or configuration.parameters.get("image")
         if isinstance(image, str):
@@ -237,6 +252,7 @@ def _runtime_preflight(
             "representation": configuration.representation,
             "artifact_files": [item.path for item in artifact.files],
             "adapter": specification.adapter,
+            "execution_strategy": strategy,
         })
 
     missing_modules = sorted(
@@ -416,6 +432,18 @@ def _environment_adapter_options(
             values[option] = value
         resolved[system_id] = values
     return resolved
+
+
+def _execution_strategy(specification) -> str:
+    """Return the explicit generic execution strategy from the registry."""
+    strategy = specification.parameters.get("execution_strategy")
+    supported = {"sparql-http", "persistent-jsonl", "rdflib-worker"}
+    if strategy not in supported:
+        raise ValueError(
+            f"unsupported execution strategy for {specification.system_id}: "
+            f"{strategy!r}"
+        )
+    return strategy
 
 
 def _run_file_backed(
@@ -681,7 +709,8 @@ class RdfExperimentMatrixResource:
                 module = __import__(module_name, fromlist=[class_name])
                 adapter_class = getattr(module, class_name)
                 adapter = None
-                if specification.configuration.kind == "server":
+                strategy = _execution_strategy(specification)
+                if strategy == "sparql-http":
                     arguments = _constructor_arguments(
                         adapter_class, artifact, str(self._data_path),
                         str(self._config_path), str(
@@ -712,7 +741,7 @@ class RdfExperimentMatrixResource:
                         raise RuntimeError(
                             f"system lifecycle failed for {system_id}: {lifecycle.error}"
                         )
-                elif specification.parameters.get("engine") in {"default", "vortex", "cottas"}:
+                elif strategy == "rdflib-worker":
                     query = RdfLibQueryBenchmark(
                         str(self._data_path), str(self._config_path),
                         str(self._directory), self._verbose,
@@ -736,7 +765,7 @@ class RdfExperimentMatrixResource:
                     if not query.execute(**query_parameters):
                         raise RuntimeError(
                             f"RDFLib-backed execution failed for {system_id}")
-                elif specification.configuration.kind == "file-backed":
+                elif strategy == "persistent-jsonl":
                     adapter = adapter_class(**dict(options.get(system_id, {})))
                     _run_file_backed(
                         adapter, self._shared / artifact.files[0].path,

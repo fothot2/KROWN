@@ -32,4 +32,4 @@ def system_configuration():
  return SystemConfiguration(system="pycottas",configuration="default",kind="file-backed",representation=REPRESENTATION,parameters={"image":IMAGE,"package":"pycottas","package_version":"1.1.0","sparql_engine":"rdflib"})
 def adapter_specification():
  from bench_executor.system_adapter_contract import LifecycleCapabilities,SystemAdapterSpecification
- return SystemAdapterSpecification(configuration=system_configuration(),adapter="bench_executor.cottas_standalone_system_adapter:CottasStandaloneSystemAdapter",capabilities=LifecycleCapabilities.for_kind("file-backed"),parameters={"engine":"cottas","sparql_engine":"rdflib"})
+ return SystemAdapterSpecification(configuration=system_configuration(),adapter="bench_executor.cottas_standalone_system_adapter:CottasStandaloneSystemAdapter",capabilities=LifecycleCapabilities.for_kind("file-backed"),parameters={"engine":"cottas","sparql_engine":"rdflib","execution_strategy":"rdflib-worker"})
