@@ -46,7 +46,7 @@ class QLeverSystemAdapter(SparqlHttpSystemAdapter):
         self._directory = Path(directory).resolve()
         self._rdf_file = artifact.files[0]
         container_source = f'/data/shared/{self._rdf_file.path}'
-        index_basename = '/data/qlever-index/bsbm-explore-1k'
+        index_basename = '/data/qlever-index/dataset'
         if index_command is None:
             batch_command = (
                 'mkdir -p /data/qlever-index && '

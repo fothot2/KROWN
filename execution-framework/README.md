@@ -591,20 +591,33 @@ The run receives `.partial`, not `.done`, and the command returns a non-success
 status after cleanup and artifact collection. Structural failures still stop
 the matrix.
 
-### BSBM HTTP-server stage
+### Generic RDF matrix command
 
-`run_rdf_matrix_http.py` executes the four SPARQL HTTP configurations through
-the generic RDF experiment matrix resource. It selects Fuseki, Virtuoso,
-Oxigraph memory, and Oxigraph RocksDB in declaration order. Each adapter owns
-its existing load, readiness, query, collection, stop, and cleanup lifecycle.
+`run_rdf_experiment_matrix.py` executes a selected subset of any external RDF
+experiment declaration. KROWN provides only the generic command and matrix
+resource. Benchmark repositories own declarations, scenarios, manifests,
+system selections, and artifact names.
 
-Successful and structurally failed attempts use separate output paths:
+The command requires explicit values for the scenario directory, external
+declaration, workload manifest, selected systems, successful artifacts, and
+structural-failure artifacts. Repeat `--system` or provide comma-separated
+system identities. For example:
 
-- `raw/bsbm-http-summary.json`
-- `raw/bsbm-http-results.tar.gz`
-- `raw/bsbm-http-failed-summary.json`
-- `raw/bsbm-http-failed-results.tar.gz`
+```bash
+python execution-framework/run_rdf_experiment_matrix.py \
+  --scenario /path/to/scenario \
+  --declaration /path/to/experiment.json \
+  --manifest manifests/workload.json \
+  --system fuseki/default \
+  --system qlever/default \
+  --results raw/summary.json \
+  --output raw/results.tar.gz \
+  --failure-results raw/failed-summary.json \
+  --failure-output raw/failed-results.tar.gz
+```
 
-Query-level failures remain compact result records. They do not stop later
-queries or systems. Structural lifecycle failures return a non-success status
-and preserve available diagnostics.
+All artifact paths are relative to the scenario's `data/shared` directory.
+The command rejects absolute paths, parent traversal, duplicate systems, and
+system identities that do not use `system/configuration` syntax. It returns a
+non-success status when the matrix resource reports a structural failure.
+Benchmark-specific invocation examples belong in the benchmark repository.

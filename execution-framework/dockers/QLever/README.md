@@ -7,7 +7,7 @@ entrypoint.
 KROWN mounts the scenario data directory at `/data`. The standard adapter derives
 commands from the verified staged N-Triples artifact:
 
-- `/qlever/qlever-index` builds `/data/qlever-index/bsbm-explore-1k`.
+- `/qlever/qlever-index` builds `/data/qlever-index/dataset`.
 - `/qlever/qlever-server` serves that index on port 7001.
 
 Explicit image, index command, and server command options still override these
