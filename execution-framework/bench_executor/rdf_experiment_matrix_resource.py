@@ -512,6 +512,12 @@ def _publish_result_bundle(
         discard_output(archive_temporary)
 
 
+def _remove_published_bundle(summary_path: Path, archive_path: Path) -> None:
+    """Remove an obsolete summary/archive pair after replacement is published."""
+    summary_path.unlink(missing_ok=True)
+    archive_path.unlink(missing_ok=True)
+
+
 def _result_summary(path: Path, experiment, representation: str) -> dict[str, Any]:
     records = []
     with path.open(encoding="utf-8") as stream:
@@ -773,6 +779,14 @@ class RdfExperimentMatrixResource:
                 run_directory, summary_path, archive_path, summaries,
                 matrix_status,
             )
+            if failure_results_file is not None and failure_output_file is not None:
+                stale_summary = resolve_shared_path(
+                    str(self._shared), failure_results_file, "Output"
+                )
+                stale_archive = resolve_shared_path(
+                    str(self._shared), failure_output_file, "Output"
+                )
+                _remove_published_bundle(stale_summary, stale_archive)
             self._logger.info(
                 f"Completed {len(summaries)} RDF experiment bindings; "
                 f"query_failures={query_failure_count}"
@@ -794,6 +808,13 @@ class RdfExperimentMatrixResource:
                         run_directory, failure_summary, failure_archive, summaries,
                         "failed", current_system, message,
                     )
+                    success_summary = resolve_shared_path(
+                        str(self._shared), results_file, "Output"
+                    )
+                    success_archive = resolve_shared_path(
+                        str(self._shared), output_file, "Output"
+                    )
+                    _remove_published_bundle(success_summary, success_archive)
                 except Exception as publish_error:
                     self._logger.error(
                         "Failed to publish matrix diagnostics: "

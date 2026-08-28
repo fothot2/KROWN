@@ -1,17 +1,61 @@
 #!/usr/bin/env python3
 """Run canonical SPARQL SELECT and ASK workloads over HTTP."""
 
+import hashlib
 import os
 import time
 
 import requests
+from rdflib import Graph
+from rdflib.compare import to_canonical_graph
 
 from bench_executor.logger import Logger
+from bench_executor.query_features import classify_query
 from bench_executor.rdf_query_benchmark import _load_query_manifest, \
         _QueryOutcome, _QueryTimeoutError, _RdfQueryAdapter, \
         _RdfQueryBenchmark
 from bench_executor.sparql_result import CORRECTNESS_MODES, \
         normalize_sparql_json_result
+
+
+_GRAPH_MEDIA_TYPES = {
+    'application/n-triples': 'nt',
+    'text/plain': 'nt',
+    'text/turtle': 'turtle',
+    'application/rdf+xml': 'xml',
+    'application/ld+json': 'json-ld',
+}
+
+
+def _normalize_graph_response(body: bytes, media_type: str) -> dict:
+    """Parse one RDF graph response and create a stable graph fingerprint."""
+    rdf_format = _GRAPH_MEDIA_TYPES.get(media_type)
+    if rdf_format is None:
+        raise RuntimeError(
+            f'Unsupported SPARQL HTTP response type: {media_type!r}'
+        )
+    try:
+        graph = Graph()
+        graph.parse(data=body, format=rdf_format)
+        canonical = to_canonical_graph(graph)
+        rows = sorted(
+            ' '.join(term.n3() for term in triple) + ' .'
+            for triple in canonical
+        )
+    except Exception as error:
+        preview = body[:200].decode('utf-8', errors='replace')
+        raise RuntimeError(
+            f'Invalid RDF graph response; content_type={media_type!r}; '
+            f'preview={preview!r}'
+        ) from error
+    payload = ('\n'.join(rows) + ('\n' if rows else '')).encode('utf-8')
+    return {
+        'result_count': len(rows),
+        'result_fingerprint': hashlib.sha256(payload).hexdigest(),
+        'normalized_result': {'type': 'graph', 'triples': rows},
+        'result_kind': 'graph',
+        'comparison_mode': 'canonical_graph_fingerprint',
+    }
 
 
 class _SparqlHttpAdapter(_RdfQueryAdapter):
@@ -44,7 +88,12 @@ class _SparqlHttpAdapter(_RdfQueryAdapter):
     def execute(self, query: str) -> _QueryOutcome:
         if self._session is None:
             raise RuntimeError('SPARQL HTTP adapter is not open')
-        headers = {'Accept': 'application/sparql-results+json'}
+        result_type = classify_query(query).result_type
+        if result_type in {'construct', 'describe'}:
+            accept = 'application/n-triples, text/turtle;q=0.9'
+        else:
+            accept = 'application/sparql-results+json'
+        headers = {'Accept': accept}
         data = {
             'query': query,
             'maxrows': '3000000',
@@ -67,17 +116,21 @@ class _SparqlHttpAdapter(_RdfQueryAdapter):
         elapsed_ns = time.perf_counter_ns() - started_ns
         response.raise_for_status()
 
-        try:
-            document = response.json()
-        except ValueError as error:
-            content_type = response.headers.get('Content-Type', '')
-            preview = body[:200].decode('utf-8', errors='replace')
-            raise RuntimeError(
-                f'Invalid SPARQL JSON response; content_type={content_type!r}; '
-                f'preview={preview!r}'
-            ) from error
-
-        normalized = normalize_sparql_json_result(document, query)
+        content_type = response.headers.get('Content-Type', '')
+        media_type = content_type.split(';', 1)[0].strip().lower()
+        if media_type in {
+                'application/sparql-results+json', 'application/json'}:
+            try:
+                document = response.json()
+            except ValueError as error:
+                preview = body[:200].decode('utf-8', errors='replace')
+                raise RuntimeError(
+                    'Invalid SPARQL JSON response; '
+                    f'content_type={content_type!r}; preview={preview!r}'
+                ) from error
+            normalized = normalize_sparql_json_result(document, query)
+        else:
+            normalized = _normalize_graph_response(body, media_type)
         result_count = normalized.pop('result_count')
         fingerprint = normalized.pop('result_fingerprint')
         full_result = normalized.pop('normalized_result')
