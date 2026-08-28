@@ -12,7 +12,10 @@ based on innovative support of existing open standards
 
 import os
 import tempfile
+from pathlib import PurePosixPath
+
 import psutil
+import requests
 from typing import Dict
 from threading import Thread
 from bench_executor.container import Container
@@ -25,9 +28,43 @@ MAX_VECTOR_SIZE = '3000000'  # max value is 'around' 3,500,000 from docs
 PASSWORD = 'root'
 NUMBER_OF_BUFFERS_PER_GB = 85000
 MAX_DIRTY_BUFFERS_PER_GB = 65000
+LOAD_GRAPH_IRI = 'http://example.com/graph'
+SPARQL_ENDPOINT = 'http://localhost:8890/sparql'
 
 
-def _spawn_loader(container):
+def _ld_dir_command(directory: str, rdf_file: str) -> str:
+    """Build one loader registration for the configured RDF graph."""
+    return (
+        "'isql' -U dba -P root "
+        f"exec=\"ld_dir('{directory}','{rdf_file}', "
+        f"'{LOAD_GRAPH_IRI}');\""
+    )
+
+
+def _split_loader_path(rdf_file: str, rdf_dir: str = '') -> tuple[str, str]:
+    """Return the loader directory and basename for one nested artifact."""
+    relative = PurePosixPath(rdf_file)
+    prefix = PurePosixPath(rdf_dir) if rdf_dir else PurePosixPath()
+    if relative.is_absolute() or prefix.is_absolute():
+        raise ValueError('Virtuoso loader paths must be relative')
+    if '..' in relative.parts or '..' in prefix.parts:
+        raise ValueError('Virtuoso loader path leaves /usr/share/proj')
+    directory = PurePosixPath('/usr/share/proj') / prefix / relative.parent
+    return str(directory), relative.name
+
+
+def _count_ntriples(path: str) -> int:
+    """Count non-empty, non-comment N-Triples statement lines."""
+    count = 0
+    with open(path, 'rb') as stream:
+        for line in stream:
+            stripped = line.lstrip()
+            if stripped and not stripped.startswith(b'#'):
+                count += 1
+    return count
+
+
+def _spawn_loader(container, outcomes):
     """Thread function to parallel load RDF.
 
     Parameters
@@ -37,6 +74,7 @@ def _spawn_loader(container):
     """
     success, logs = container.exec('\'isql\' -U dba -P root '
                                    'exec="rdf_loader_run();"')
+    outcomes.append(success)
 
 
 class Virtuoso(Container):
@@ -83,7 +121,7 @@ class Virtuoso(Container):
                          environment=environment,
                          volumes=[f'{self._data_path}/shared:/usr/share/proj',
                                   f'{tmp_dir}:/database'])
-        self._endpoint = 'http://localhost:8890/sparql'
+        self._endpoint = SPARQL_ENDPOINT
 
     def initialization(self) -> bool:
         """Initialize Virtuoso's database.
@@ -180,12 +218,13 @@ class Virtuoso(Container):
             self._logger.error('RDF files do not exist for loading')
             return False
 
-        # Load directory with data
-        directory = f'/usr/share/proj/{rdf_dir}'
-        success, logs = self.exec('\'isql\' -U dba -P root '
-                                  f'exec="ld_dir(\'{directory}\','
-                                  f'\'{rdf_file}\', '
-                                  '\'http://example.com/graph\');"')
+        # Register the basename in its actual mounted directory.
+        try:
+            directory, loader_file = _split_loader_path(rdf_file, rdf_dir)
+        except ValueError as error:
+            self._logger.error(str(error))
+            return False
+        success, logs = self.exec(_ld_dir_command(directory, loader_file))
         for line in logs:
             self._logger.debug(line)
         if not success:
@@ -193,14 +232,21 @@ class Virtuoso(Container):
             return False
 
         loader_threads = []
+        loader_outcomes = []
         self._logger.debug(f'Spawning {cores} loader threads')
         for i in range(cores):
-            t = Thread(target=_spawn_loader, args=(self,), daemon=True)
+            t = Thread(
+                target=_spawn_loader, args=(self, loader_outcomes),
+                daemon=True,
+            )
             t.start()
             loader_threads.append(t)
 
         for t in loader_threads:
             t.join()
+        if len(loader_outcomes) != cores or not all(loader_outcomes):
+            self._logger.error('One or more Virtuoso loader threads failed')
+            return False
         self._logger.debug(f'Loading finished with {cores} threads')
 
         # Re-enable checkpoints and scheduler which are disabled automatically
@@ -228,7 +274,37 @@ class Virtuoso(Container):
             self._logger.error('ISQL scheduler interval query failure')
             return False
 
-        return success
+        source_path = os.path.join(
+            self._data_path, 'shared', rdf_dir, rdf_file
+        )
+        try:
+            expected = _count_ntriples(source_path)
+            response = requests.post(
+                SPARQL_ENDPOINT,
+                data={
+                    'query': (
+                        'SELECT (COUNT(*) AS ?count) WHERE { GRAPH <'
+                        + LOAD_GRAPH_IRI + '> { ?s ?p ?o } }'
+                    ),
+                },
+                headers={'Accept': 'application/sparql-results+json'},
+                timeout=120,
+            )
+            response.raise_for_status()
+            bindings = response.json()['results']['bindings']
+            actual = int(bindings[0]['count']['value'])
+        except (OSError, KeyError, IndexError, TypeError, ValueError,
+                requests.RequestException) as error:
+            self._logger.error(
+                f'Failed to verify the Virtuoso loader graph: {error}'
+            )
+            return False
+        if actual != expected:
+            self._logger.error(
+                f'Virtuoso loaded {actual} triples; expected {expected}'
+            )
+            return False
+        return True
 
     def stop(self) -> bool:
         """Stop Virtuoso.

@@ -46,7 +46,8 @@ class Container():
 
     def __init__(self, container: str, name: str, logger: Logger,
                  ports: dict = {}, environment: dict = {},
-                 volumes: List[str] = []):
+                 volumes: List[str] = [],
+                 working_directory: str | None = None):
         """Creates an instance of the Container class.
 
         Parameters
@@ -70,6 +71,7 @@ class Container():
         self._ports = ports
         self._volumes = volumes
         self._environment = environment
+        self._working_directory = working_directory
         self._proc_pid = None
         self._long_id = None
         self._cgroups_mode = None
@@ -113,7 +115,8 @@ class Container():
         v = self._volumes
         self._started, self._container_id = \
             self._docker.run(self._container_name, command, self._name, detach,
-                             self._ports, NETWORK_NAME, e, v)
+                             self._ports, NETWORK_NAME, e, v,
+                             working_directory=self._working_directory)
 
         if not self._started:
             self._logger.error(f'Starting container "{self._name}" failed!')

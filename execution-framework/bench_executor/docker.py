@@ -7,6 +7,8 @@ which is similar has serious issues with resource leaking for years.
 """
 
 import json
+import os
+import shlex
 import subprocess
 from time import sleep
 from typing import List, Tuple
@@ -143,7 +145,8 @@ class Docker():
 
     def run(self, image: str, command: str, name: str, detach: bool,
             ports: dict, network: str, environment: dict,
-            volumes: List[str], must_pull: bool = True) -> Tuple[bool, str]:
+            volumes: List[str], must_pull: bool = True,
+            working_directory: str | None = None) -> Tuple[bool, str]:
         """Start a Docker container.
 
         Parameters
@@ -175,6 +178,14 @@ class Docker():
             ID of the container that was started.
         """
 
+        if working_directory is not None:
+            if (not isinstance(working_directory, str)
+                    or not working_directory.strip()
+                    or not os.path.isabs(working_directory)):
+                raise ValueError(
+                    'working_directory must be an absolute container path'
+                )
+
         # Make sure the image is available locally
         if must_pull:
             self.pull(image)
@@ -203,6 +214,8 @@ class Docker():
             cmd += f' -p "{host_port}:{container_port}"'
         for volume in volumes:
             cmd += f' -v "{volume}"'
+        if working_directory is not None:
+            cmd += f' --workdir {shlex.quote(working_directory)}'
         cmd += f' --network "{network}"'
         cmd += f' {image} {command}'
         self._logger.debug(f'Starting Docker container: {cmd}')

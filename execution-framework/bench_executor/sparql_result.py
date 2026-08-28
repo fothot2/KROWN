@@ -12,6 +12,18 @@ from bench_executor.query_features import classify_query, \
         comparison_metadata
 
 CORRECTNESS_MODES = frozenset({'none', 'fingerprint', 'full'})
+_XSD = 'http://www.w3.org/2001/XMLSchema#'
+_CANONICAL_DATATYPES = {
+    _XSD + 'int': _XSD + 'integer',
+    _XSD + 'string': None,
+}
+
+
+def _canonical_datatype(datatype: str | None, language: str | None) -> str | None:
+    """Map equivalent RDF literal datatypes to one benchmark form."""
+    if language is not None:
+        return None
+    return _CANONICAL_DATATYPES.get(datatype, datatype)
 
 
 def _normalize_term(term) -> dict[str, Any] | None:
@@ -23,11 +35,13 @@ def _normalize_term(term) -> dict[str, Any] | None:
     if isinstance(term, BNode):
         return {'type': 'bnode', 'value': str(term)}
     if isinstance(term, Literal):
+        language = term.language
+        datatype = str(term.datatype) if term.datatype else None
         return {
             'type': 'literal',
             'value': str(term),
-            'language': term.language,
-            'datatype': str(term.datatype) if term.datatype else None,
+            'language': language,
+            'datatype': _canonical_datatype(datatype, language),
         }
     raise TypeError(f'Unsupported RDF term type: {type(term).__name__}')
 
@@ -127,14 +141,45 @@ def _normalize_sparql_json_binding(binding: dict) -> dict:
     if binding_type == 'bnode':
         return {'type': 'bnode', 'value': value}
     if binding_type in {'literal', 'typed-literal'}:
+        language = binding.get('xml:lang') or binding.get('lang')
         return {
             'type': 'literal',
             'value': value,
-            'language': binding.get('xml:lang') or binding.get('lang'),
-            'datatype': binding.get('datatype'),
+            'language': language,
+            'datatype': _canonical_datatype(binding.get('datatype'), language),
         }
     raise ValueError(f'Unsupported SPARQL JSON binding type: {binding_type}')
 
+
+
+def normalize_graph_terms(rows: list, query: str) -> dict[str, Any]:
+    """Normalize materialized graph triples through canonical RDF terms."""
+    normalized_rows = []
+    contains_blank_nodes = False
+    for subject, predicate, object_ in rows:
+        normalized = [
+            _normalize_term(subject),
+            _normalize_term(predicate),
+            _normalize_term(object_),
+        ]
+        contains_blank_nodes |= any(
+            term is not None and term.get('type') == 'bnode'
+            for term in normalized
+        )
+        normalized_rows.append(normalized)
+    normalized_rows.sort(key=_canonical_json)
+    payload = {'result_kind': 'graph', 'triples': normalized_rows}
+    output = {
+        'result_count': len(normalized_rows),
+        'result_kind': 'graph',
+        'result_variables': [],
+        'result_ordered': False,
+        'result_fingerprint': _fingerprint(payload),
+        'contains_blank_nodes': contains_blank_nodes,
+        'normalized_result': payload,
+    }
+    output.update(comparison_metadata(classify_query(query), contains_blank_nodes))
+    return output
 
 def normalize_sparql_json_result(document: dict,
                                  query: str) -> dict[str, Any]:

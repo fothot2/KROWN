@@ -4,3 +4,4 @@ smoke-query-benchmark/*
 frozen-four-system/*
 smoke-sparql-http-benchmark/*
 frozen-validation/*
+benchmark-integration/bsbm-smoke/*

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
+import shlex
 
 from bench_executor.experiment_matrix_contract import DatasetArtifact
 from bench_executor.qlever import QLever
@@ -47,16 +48,18 @@ class QLeverSystemAdapter(SparqlHttpSystemAdapter):
         container_source = f'/data/shared/{self._rdf_file.path}'
         index_basename = '/data/qlever-index/bsbm-explore-1k'
         if index_command is None:
-            index_command = (
+            batch_command = (
                 'mkdir -p /data/qlever-index && '
                 f'/qlever/qlever-index --index-basename {index_basename} '
-                f'--kg-input-file {container_source} --file-format nt'
+                f'--kg-input-file {shlex.quote(container_source)} --file-format nt'
             )
+            index_command = '-c ' + shlex.quote(batch_command)
         if server_command is None:
-            server_command = (
-                f'/qlever/qlever-server --index-basename {index_basename} '
+            batch_command = (
+                f'exec /qlever/qlever-server --index-basename {index_basename} '
                 f'--port {port}'
             )
+            server_command = '-c ' + shlex.quote(batch_command)
         self._qlever = QLever(
             str(self._data_path), str(self._directory), verbose,
             image, index_command, server_command, port,

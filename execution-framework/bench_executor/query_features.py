@@ -89,7 +89,13 @@ def comparison_metadata(features: QueryFeatures,
     warning = None
     if features.result_type == 'ask':
         mode = 'boolean'
-    elif features.result_type not in {'select', 'construct', 'describe'}:
+    elif features.result_type == 'describe':
+        mode = 'implementation_defined_describe'
+        warning = (
+            'DESCRIBE graph contents are implementation-defined and must not '
+            'be compared strictly across systems.'
+        )
+    elif features.result_type not in {'select', 'construct'}:
         mode = 'unsupported'
         warning = 'Unsupported query result type.'
     elif contains_blank_nodes:

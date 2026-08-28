@@ -20,7 +20,10 @@ from csv import DictReader
 sys.path.append('../')
 from bench_executor.logger import Logger  # noqa: E402
 from bench_executor.container import Container  # noqa: E402
-from bench_executor.fuseki import Fuseki  # noqa: E402
+from bench_executor.fuseki import (  # noqa: E402
+        CMD_ARGS, READY_ENDPOINT, READY_POLL_SECONDS,
+        READY_QUERY, READY_REQUEST_TIMEOUT_SECONDS,
+        READY_TIMEOUT_SECONDS, Fuseki)
 from bench_executor.fuseki_system_adapter import FusekiSystemAdapter  # noqa: E402
 from bench_executor.virtuoso_system_adapter import VirtuosoSystemAdapter  # noqa: E402
 from bench_executor.qlever import QLever  # noqa: E402
@@ -126,6 +129,64 @@ class UnitTests(unittest.TestCase):
         container._logger.error.assert_any_call(
             'Starting container "Test" timed out!'
         )
+
+    def test_fuseki_readiness_uses_bounded_http_probe(self):
+        fuseki = Fuseki.__new__(Fuseki)
+        fuseki._logger = MagicMock()
+        fuseki.run = MagicMock(return_value=True)
+        not_ready = requests.ConnectionError('not ready')
+        ready = MagicMock()
+        ready.raise_for_status.return_value = None
+        ready.json.return_value = {'boolean': True}
+
+        with patch(
+                'bench_executor.fuseki.requests.post',
+                side_effect=[not_ready, ready]) as post, patch(
+                'bench_executor.fuseki.monotonic',
+                side_effect=[0, 0, 1, 2]), patch(
+                'bench_executor.fuseki.sleep') as wait:
+            success = fuseki.wait_until_ready()
+
+        self.assertTrue(success)
+        fuseki.run.assert_called_once_with(f' {CMD_ARGS}')
+        self.assertEqual(post.call_count, 2)
+        post.assert_called_with(
+            READY_ENDPOINT,
+            data={'query': READY_QUERY},
+            timeout=READY_REQUEST_TIMEOUT_SECONDS,
+        )
+        wait.assert_called_once_with(READY_POLL_SECONDS)
+
+    def test_fuseki_readiness_timeout_is_bounded(self):
+        fuseki = Fuseki.__new__(Fuseki)
+        fuseki._logger = MagicMock()
+        fuseki.run = MagicMock(return_value=True)
+
+        with patch(
+                'bench_executor.fuseki.requests.post',
+                side_effect=requests.ConnectionError('not ready')), patch(
+                'bench_executor.fuseki.monotonic',
+                side_effect=[0, 0, READY_TIMEOUT_SECONDS]), patch(
+                'bench_executor.fuseki.sleep') as wait:
+            success = fuseki.wait_until_ready()
+
+        self.assertFalse(success)
+        wait.assert_called_once_with(READY_POLL_SECONDS)
+        fuseki._logger.error.assert_called_once_with(
+            'Waiting for Fuseki HTTP readiness timed out after '
+            f'{READY_TIMEOUT_SECONDS} seconds'
+        )
+
+    def test_fuseki_readiness_stops_after_start_failure(self):
+        fuseki = Fuseki.__new__(Fuseki)
+        fuseki._logger = MagicMock()
+        fuseki.run = MagicMock(return_value=False)
+
+        with patch('bench_executor.fuseki.requests.post') as post:
+            success = fuseki.wait_until_ready()
+
+        self.assertFalse(success)
+        post.assert_not_called()
 
     def test_fuseki_uses_embedded_logging_configuration(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(

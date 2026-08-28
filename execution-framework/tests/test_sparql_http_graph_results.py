@@ -75,6 +75,29 @@ class SparqlHttpGraphResultTests(unittest.TestCase):
         )).execute('DESCRIBE <http://e/a>')
         self.assertEqual(first.result_fingerprint, second.result_fingerprint)
 
+
+    def test_graph_canonicalizes_int_and_integer(self):
+        first = self.adapter(FakeResponse(
+            b'<http://e/s> <http://e/p> "3"^^<http://www.w3.org/2001/XMLSchema#int> .\n',
+            'application/n-triples',
+        )).execute('CONSTRUCT { ?s ?p ?o } WHERE { ?s ?p ?o }')
+        second = self.adapter(FakeResponse(
+            b'<http://e/s> <http://e/p> "3"^^<http://www.w3.org/2001/XMLSchema#integer> .\n',
+            'application/n-triples',
+        )).execute('CONSTRUCT { ?s ?p ?o } WHERE { ?s ?p ?o }')
+        self.assertEqual(first.result_fingerprint, second.result_fingerprint)
+
+    def test_graph_canonicalizes_plain_and_xsd_string(self):
+        first = self.adapter(FakeResponse(
+            b'<http://e/s> <http://e/p> "value" .\n',
+            'application/n-triples',
+        )).execute('CONSTRUCT { ?s ?p ?o } WHERE { ?s ?p ?o }')
+        second = self.adapter(FakeResponse(
+            b'<http://e/s> <http://e/p> "value"^^<http://www.w3.org/2001/XMLSchema#string> .\n',
+            'application/n-triples',
+        )).execute('CONSTRUCT { ?s ?p ?o } WHERE { ?s ?p ?o }')
+        self.assertEqual(first.result_fingerprint, second.result_fingerprint)
+
     def test_unknown_response_type_is_reported(self):
         adapter = self.adapter(FakeResponse(b'not RDF', 'text/html'))
         with self.assertRaisesRegex(RuntimeError, 'Unsupported'):

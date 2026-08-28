@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Run canonical SPARQL SELECT and ASK workloads over HTTP."""
 
-import hashlib
 import os
 import time
 
@@ -15,7 +14,49 @@ from bench_executor.rdf_query_benchmark import _load_query_manifest, \
         _QueryOutcome, _QueryTimeoutError, _RdfQueryAdapter, \
         _RdfQueryBenchmark
 from bench_executor.sparql_result import CORRECTNESS_MODES, \
-        normalize_sparql_json_result
+        normalize_graph_terms, normalize_sparql_json_result
+
+
+_QLEVER_SYSTEM = 'qlever/default'
+_VIRTUOSO_SYSTEM = 'virtuoso/default'
+_VIRTUOSO_DEFAULT_GRAPH = 'http://example.com/graph'
+_XSD_INT = 'http://www.w3.org/2001/XMLSchema#int'
+_XSD_INTEGER = 'http://www.w3.org/2001/XMLSchema#integer'
+
+
+def _correct_qlever_integer_datatypes(document: dict) -> dict:
+    """Correct QLever 0.6.0 integer datatypes without mutating input."""
+    results = document.get('results')
+    if not isinstance(results, dict):
+        return document
+    bindings = results.get('bindings')
+    if not isinstance(bindings, list):
+        return document
+    corrected_bindings = []
+    changed = False
+    for row in bindings:
+        if not isinstance(row, dict):
+            corrected_bindings.append(row)
+            continue
+        corrected_row = {}
+        row_changed = False
+        for variable, term in row.items():
+            if isinstance(term, dict) and term.get('datatype') == _XSD_INT:
+                corrected_term = dict(term)
+                corrected_term['datatype'] = _XSD_INTEGER
+                corrected_row[variable] = corrected_term
+                row_changed = True
+            else:
+                corrected_row[variable] = term
+        corrected_bindings.append(corrected_row if row_changed else row)
+        changed = changed or row_changed
+    if not changed:
+        return document
+    corrected_results = dict(results)
+    corrected_results['bindings'] = corrected_bindings
+    corrected_document = dict(document)
+    corrected_document['results'] = corrected_results
+    return corrected_document
 
 
 _GRAPH_MEDIA_TYPES = {
@@ -38,24 +79,16 @@ def _normalize_graph_response(body: bytes, media_type: str) -> dict:
         graph = Graph()
         graph.parse(data=body, format=rdf_format)
         canonical = to_canonical_graph(graph)
-        rows = sorted(
-            ' '.join(term.n3() for term in triple) + ' .'
-            for triple in canonical
-        )
+        rows = list(canonical)
     except Exception as error:
         preview = body[:200].decode('utf-8', errors='replace')
         raise RuntimeError(
             f'Invalid RDF graph response; content_type={media_type!r}; '
             f'preview={preview!r}'
         ) from error
-    payload = ('\n'.join(rows) + ('\n' if rows else '')).encode('utf-8')
-    return {
-        'result_count': len(rows),
-        'result_fingerprint': hashlib.sha256(payload).hexdigest(),
-        'normalized_result': {'type': 'graph', 'triples': rows},
-        'result_kind': 'graph',
-        'comparison_mode': 'canonical_graph_fingerprint',
-    }
+    return normalize_graph_terms(
+        rows, 'CONSTRUCT { ?s ?p ?o } WHERE { ?s ?p ?o }'
+    )
 
 
 class _SparqlHttpAdapter(_RdfQueryAdapter):
@@ -63,7 +96,8 @@ class _SparqlHttpAdapter(_RdfQueryAdapter):
 
     def __init__(self, endpoint: str, timeout_s: float,
                  correctness_mode: str = 'fingerprint',
-                 full_result_max_rows: int = 10000):
+                 full_result_max_rows: int = 10000,
+                 system: str | None = None):
         if not isinstance(endpoint, str) or not endpoint:
             raise ValueError('endpoint must be a non-empty string')
         if timeout_s <= 0:
@@ -78,6 +112,7 @@ class _SparqlHttpAdapter(_RdfQueryAdapter):
         self._timeout_s = timeout_s
         self._correctness_mode = correctness_mode
         self._full_result_max_rows = full_result_max_rows
+        self._system = system
         self._session = None
 
     def open(self) -> None:
@@ -98,6 +133,8 @@ class _SparqlHttpAdapter(_RdfQueryAdapter):
             'query': query,
             'maxrows': '3000000',
         }
+        if self._system == _VIRTUOSO_SYSTEM:
+            data['default-graph-uri'] = _VIRTUOSO_DEFAULT_GRAPH
         started_ns = time.perf_counter_ns()
         try:
             response = self._session.post(
@@ -122,6 +159,8 @@ class _SparqlHttpAdapter(_RdfQueryAdapter):
                 'application/sparql-results+json', 'application/json'}:
             try:
                 document = response.json()
+                if self._system == _QLEVER_SYSTEM:
+                    document = _correct_qlever_integer_datatypes(document)
             except ValueError as error:
                 preview = body[:200].decode('utf-8', errors='replace')
                 raise RuntimeError(
@@ -214,6 +253,7 @@ class SparqlHttpBenchmark:
                     timeout_s=timeout_s,
                     correctness_mode=correctness_mode,
                     full_result_max_rows=full_result_max_rows,
+                    system=system,
                 )
 
             benchmark = _RdfQueryBenchmark(

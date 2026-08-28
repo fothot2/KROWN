@@ -9,6 +9,8 @@ service, as a Java web application (WAR file), and as a standalone server.
 
 import os
 import subprocess
+from time import monotonic, sleep
+
 import requests
 import psutil
 from typing import Dict
@@ -18,6 +20,11 @@ from bench_executor.logger import Logger
 VERSION = '6.2.0'
 CMD_ARGS = '--tdb2 --update --loc /fuseki/databases/DB /ds'
 DATABASE_CONTAINER_PATH = '/fuseki/databases/DB'
+READY_ENDPOINT = 'http://localhost:3030/ds/query'
+READY_TIMEOUT_SECONDS = 120
+READY_POLL_SECONDS = 1
+READY_REQUEST_TIMEOUT_SECONDS = 5
+READY_QUERY = 'ASK { }'
 
 
 class Fuseki(Container):
@@ -143,21 +150,33 @@ class Fuseki(Container):
         return headers
 
     def wait_until_ready(self, command: str = '') -> bool:
-        """Wait until Fuseki is ready to execute SPARQL queries.
-
-        Parameters
-        ----------
-        command : str
-            Command to execute in the Fuseki container, optionally, defaults to
-            no command.
-
-        Returns
-        -------
-        success : bool
-            Whether the Fuseki was initialized successfull or not.
-        """
+        """Start Fuseki and wait for a successful bounded HTTP probe."""
         command = f'{command} {CMD_ARGS}'
-        return self.run_and_wait_for_log(':: Start Fuseki ', command=command)
+        if not self.run(command):
+            self._logger.error(f'Command "{command}" failed')
+            return False
+
+        deadline = monotonic() + READY_TIMEOUT_SECONDS
+        while monotonic() < deadline:
+            try:
+                response = requests.post(
+                    READY_ENDPOINT,
+                    data={'query': READY_QUERY},
+                    timeout=READY_REQUEST_TIMEOUT_SECONDS,
+                )
+                response.raise_for_status()
+                payload = response.json()
+                if payload.get('boolean') is True:
+                    return True
+            except (requests.RequestException, ValueError):
+                pass
+            sleep(READY_POLL_SECONDS)
+
+        self._logger.error(
+            f'Waiting for Fuseki HTTP readiness timed out after '
+            f'{READY_TIMEOUT_SECONDS} seconds'
+        )
+        return False
 
     def load(self, rdf_file: str) -> bool:
         """Load an RDF file into Fuseki.
