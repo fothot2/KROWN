@@ -132,23 +132,43 @@ def normalize_materialized_result(result, rows: list,
     output.update(comparison_metadata(features, contains_blank_nodes))
     return output
 
+def _normalize_json_term(term: dict) -> dict:
+    """Validate and canonicalize one RDF term supplied as JSON."""
+    if not isinstance(term, dict):
+        raise ValueError('JSON RDF term must be an object')
+    term_type = term.get('type')
+    value = term.get('value')
+    if not isinstance(value, str):
+        raise ValueError('JSON RDF term value must be a string')
+    if term_type in {'uri', 'bnode'}:
+        if not value:
+            raise ValueError(f'JSON RDF {term_type} value must not be empty')
+        invalid = [field for field in ('language', 'xml:lang', 'lang', 'datatype')
+                   if term.get(field) is not None]
+        if invalid:
+            raise ValueError(f'JSON RDF {term_type} cannot define {", ".join(invalid)}')
+        return {'type': term_type, 'value': value}
+    if term_type not in {'literal', 'typed-literal'}:
+        raise ValueError(f'Unsupported JSON RDF term type: {term_type}')
+    languages = {field: term[field] for field in ('language', 'xml:lang', 'lang')
+                 if field in term and term[field] is not None}
+    for field, language in languages.items():
+        if not isinstance(language, str) or not language:
+            raise ValueError(f'JSON RDF term {field} must be a non-empty string')
+    distinct = set(languages.values())
+    if len(distinct) > 1:
+        raise ValueError('JSON RDF term has conflicting language fields')
+    language = next(iter(distinct), None)
+    datatype = term.get('datatype')
+    if datatype is not None and (not isinstance(datatype, str) or not datatype):
+        raise ValueError('JSON RDF term datatype must be a non-empty string')
+    return {'type': 'literal', 'value': value, 'language': language,
+            'datatype': _canonical_datatype(datatype, language)}
+
+
 def _normalize_sparql_json_binding(binding: dict) -> dict:
     """Convert one SPARQL Results JSON binding to canonical term JSON."""
-    binding_type = binding.get('type')
-    value = binding.get('value')
-    if binding_type == 'uri':
-        return {'type': 'uri', 'value': value}
-    if binding_type == 'bnode':
-        return {'type': 'bnode', 'value': value}
-    if binding_type in {'literal', 'typed-literal'}:
-        language = binding.get('xml:lang') or binding.get('lang')
-        return {
-            'type': 'literal',
-            'value': value,
-            'language': language,
-            'datatype': _canonical_datatype(binding.get('datatype'), language),
-        }
-    raise ValueError(f'Unsupported SPARQL JSON binding type: {binding_type}')
+    return _normalize_json_term(binding)
 
 
 
@@ -199,14 +219,19 @@ def normalize_sparql_json_result(document: dict,
         triples = document.get('triples')
         if not isinstance(triples, list):
             raise ValueError('worker graph result is invalid')
-        normalized_rows = sorted(triples, key=_canonical_json)
+        normalized_rows = []
+        for row in triples:
+            if not isinstance(row, list) or len(row) != 3:
+                raise ValueError('worker graph triples must be three-term arrays')
+            normalized_rows.append([_normalize_json_term(term) for term in row])
+        normalized_rows.sort(key=_canonical_json)
         payload = {'result_kind': 'graph', 'triples': normalized_rows}
         features = classify_query(query)
         output = {
             'result_count': len(normalized_rows),
             'result_kind': 'graph', 'result_variables': [],
             'result_ordered': False, 'result_fingerprint': _fingerprint(payload),
-            'contains_blank_nodes': any(term.get('type') == 'bnode' for row in normalized_rows for term in row),
+            'contains_blank_nodes': any(term['type'] == 'bnode' for row in normalized_rows for term in row),
             'normalized_result': payload,
         }
         output.update(comparison_metadata(features, output['contains_blank_nodes']))
