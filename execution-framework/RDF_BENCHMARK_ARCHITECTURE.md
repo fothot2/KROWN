@@ -34,3 +34,22 @@ python execution-framework/tests/unit_tests \
   UnitTests.test_cross_benchmark_rdf_architecture_audit \
   -v
 ```
+## Experiment matrix and comparison
+
+`RdfExperimentMatrixResource` executes an external benchmark-owned experiment
+declaration. It publishes compact result archives. Separate matrix runs can
+publish separate archives for different system groups.
+
+`RdfCrossSystemComparisonResource` is a downstream consumer. It combines two or
+more compact archives and publishes one atomic comparison report. It does not
+execute queries and it does not change matrix results.
+
+KROWN owns the generic comparison implementation and workflow resource. The
+benchmark repository owns query selection and optional limitation policy. A
+policy can classify an exact observed failure as a deferred limitation. KROWN
+must not hard-code benchmark names, query IDs, or system exceptions.
+
+The workload manifest controls comparison semantics. Strict query modes compare
+result counts and fingerprints. `DESCRIBE` remains implementation-defined.
+Runtime archives, policies for temporary local limitations, and generated
+comparison reports remain outside tracked KROWN source.

@@ -621,3 +621,50 @@ The command rejects absolute paths, parent traversal, duplicate systems, and
 system identities that do not use `system/configuration` syntax. It returns a
 non-success status when the matrix resource reports a structural failure.
 Benchmark-specific invocation examples belong in the benchmark repository.
+### Cross-system RDF result comparison workflow
+
+Cross-system comparison is a separate step after RDF matrix execution. One
+comparison can consume result archives from multiple independent matrix runs.
+`RdfCrossSystemComparisonResource` reads one workload manifest, a non-empty list
+of compact result archives, and one optional policy file. It publishes one
+atomic JSON report.
+
+The resource uses input-only parameter names for the manifest, archives, and
+policy. The executor therefore does not collect or remove these inputs. Only
+`output_file` declares the generated comparison report.
+
+```json
+{
+  "resource": "RdfCrossSystemComparisonResource",
+  "command": "execute",
+  "parameters": {
+    "manifest_file": "manifests/workload.json",
+    "archive_files": [
+      "raw/http-results.tar.gz",
+      "raw/embedded-results.tar.gz"
+    ],
+    "policy_file": "comparison/policy.json",
+    "output_file": "raw/cross-system-comparison.json"
+  }
+}
+```
+
+All paths are relative to the scenario `data/shared` directory. The policy is
+optional. Benchmark repositories own limitation policy. KROWN does not contain
+benchmark names, query exceptions, or system-specific expected failures.
+
+The report distinguishes structural incompleteness, strict semantic matches,
+strict semantic mismatches, implementation-defined `DESCRIBE` results,
+execution failures, non-strict comparisons, and policy-declared deferred
+limitations. Runtime archives and generated reports remain untracked.
+
+For manual use, call the standalone CLI:
+
+```bash
+python execution-framework/compare_rdf_results.py \
+  --manifest /path/to/workload.json \
+  --archive /path/to/first-results.tar.gz \
+  --archive /path/to/second-results.tar.gz \
+  --policy /path/to/optional-policy.json \
+  --output /path/to/comparison.json
+```
