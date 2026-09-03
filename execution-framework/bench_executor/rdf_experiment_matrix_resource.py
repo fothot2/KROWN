@@ -12,6 +12,7 @@ import socket
 import subprocess
 import tarfile
 import tempfile
+import time
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -480,6 +481,9 @@ def _compact_result_record(record: Mapping[str, Any]) -> dict[str, Any]:
         raise ValueError(
             "result record misses compact fields: " + ", ".join(missing))
     compact = {name: record[name] for name in _COMPACT_RESULT_FIELDS}
+    for name in ("stream_position", "bsbm_template_id"):
+        if name in record:
+            compact[name] = record[name]
     if record["status"] != "ok":
         for name in ("error_type", "error_message"):
             value = record.get(name)
@@ -653,6 +657,7 @@ class RdfExperimentMatrixResource:
         run_directory = None
         summaries: list[dict[str, Any]] = []
         current_system: str | None = None
+        matrix_started_ns = time.perf_counter_ns()
         try:
             declaration_path = Path(declaration_file).expanduser().resolve()
             if not declaration_path.is_file():
@@ -694,6 +699,8 @@ class RdfExperimentMatrixResource:
                 prefix="rdf-matrix-", dir=self._shared))
             summaries = []
             for experiment in experiments:
+                system_started_ns = time.perf_counter_ns()
+                measured_started_ns = system_started_ns
                 system_id = experiment.system_configuration
                 current_system = system_id
                 specification = specifications[system_id]
@@ -774,6 +781,8 @@ class RdfExperimentMatrixResource:
                 else:
                     raise ValueError(
                         f"no generic execution strategy for {system_id}")
+                measured_ns = time.perf_counter_ns() - measured_started_ns
+                validation_started_ns = time.perf_counter_ns()
                 summary = _result_summary(
                     output_path, experiment, representation
                 )
@@ -785,6 +794,35 @@ class RdfExperimentMatrixResource:
                     else "completed_with_failures"
                 )
                 _compact_result_file(output_path)
+                validation_ns = time.perf_counter_ns() - validation_started_ns
+                total_wall_ns = time.perf_counter_ns() - system_started_ns
+                classified_ns = measured_ns + validation_ns
+                unclassified_ns = total_wall_ns - classified_ns
+                if unclassified_ns < 0:
+                    raise RuntimeError(
+                        f"system timing stages exceed wall total for {system_id}"
+                    )
+                system_stages_ns = {
+                    "preflight": 0,
+                    "artifact_open_or_load": 0,
+                    "engine_startup": 0,
+                    "warmup": 0,
+                    "measured": measured_ns,
+                    "engine_shutdown": 0,
+                    "validation": validation_ns,
+                    "archive": 0,
+                    "unclassified": unclassified_ns,
+                }
+                summary["system_timing"] = {
+                    "schema": "rdf-system-timing-v1",
+                    "clock": "perf_counter_ns",
+                    "stages_ns": system_stages_ns,
+                    "stages_sum_ns": sum(system_stages_ns.values()),
+                    "total_wall_ns": total_wall_ns,
+                    "reconciled": (
+                        sum(system_stages_ns.values()) == total_wall_ns
+                    ),
+                }
                 summaries.append(summary)
                 if summary["failure_count"]:
                     self.last_outcome = "partial"
@@ -804,9 +842,17 @@ class RdfExperimentMatrixResource:
                 "ok" if query_failure_count == 0
                 else "completed_with_failures"
             )
+            archive_started_ns = time.perf_counter_ns()
             _publish_result_bundle(
                 run_directory, summary_path, archive_path, summaries,
                 matrix_status,
+            )
+            archive_ns = time.perf_counter_ns() - archive_started_ns
+            matrix_total_wall_ns = time.perf_counter_ns() - matrix_started_ns
+            self._logger.info(
+                "RDF matrix timing "
+                f"clock=perf_counter_ns total_wall_ns={matrix_total_wall_ns} "
+                f"archive_ns={archive_ns}"
             )
             if failure_results_file is not None and failure_output_file is not None:
                 stale_summary = resolve_shared_path(
