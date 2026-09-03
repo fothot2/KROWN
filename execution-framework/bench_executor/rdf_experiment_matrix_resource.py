@@ -470,7 +470,9 @@ def _run_file_backed(
 
 _COMPACT_RESULT_FIELDS = (
     "query_id", "phase", "run", "status", "elapsed_ns",
-    "result_count", "result_fingerprint",
+    "result_count", "result_fingerprint", "client_elapsed_ns",
+    "attempt_elapsed_ns", "timing_clock", "timing_schema",
+    "timing_stages_ns", "timing_stages_sum_ns", "timing_reconciled",
 )
 
 
@@ -572,6 +574,50 @@ def _remove_published_bundle(summary_path: Path, archive_path: Path) -> None:
     archive_path.unlink(missing_ok=True)
 
 
+def _attempt_timing_summary(records: list[dict[str, Any]]) -> dict[str, Any]:
+    """Validate attempt timing and aggregate cumulative phase latency."""
+    phases: dict[str, dict[str, int]] = {}
+    for index, record in enumerate(records, 1):
+        if record.get("timing_schema") != "rdf-attempt-timing-v1":
+            raise ValueError(f"record {index} misses RDF attempt timing schema")
+        if record.get("timing_clock") != "perf_counter_ns":
+            raise ValueError(f"record {index} uses an unsupported timing clock")
+        total_ns = record.get("attempt_elapsed_ns")
+        stages = record.get("timing_stages_ns")
+        if (not isinstance(total_ns, int) or isinstance(total_ns, bool)
+                or total_ns < 0 or not isinstance(stages, dict)):
+            raise ValueError(f"record {index} has invalid attempt timing")
+        stage_sum_ns = sum(stages.values())
+        if (stage_sum_ns != total_ns
+                or record.get("timing_stages_sum_ns") != stage_sum_ns
+                or record.get("timing_reconciled") is not True):
+            raise ValueError(f"record {index} has unreconciled attempt timing")
+        phase = record.get("phase")
+        if phase not in {"warmup", "measured"}:
+            raise ValueError(f"record {index} has invalid timing phase: {phase!r}")
+        aggregate = phases.setdefault(phase, {
+            "attempt_count": 0,
+            "attempt_total_ns": 0,
+            "successful_attempt_count": 0,
+            "successful_attempt_total_ns": 0,
+        })
+        aggregate["attempt_count"] += 1
+        aggregate["attempt_total_ns"] += total_ns
+        if record.get("status") == "ok":
+            aggregate["successful_attempt_count"] += 1
+            aggregate["successful_attempt_total_ns"] += total_ns
+    return {
+        "schema": "rdf-workload-timing-v1",
+        "clock": "perf_counter_ns",
+        "semantics": "cumulative-attempt-latency",
+        "phases": phases,
+        "attempt_count": sum(value["attempt_count"] for value in phases.values()),
+        "attempt_total_ns": sum(
+            value["attempt_total_ns"] for value in phases.values()
+        ),
+    }
+
+
 def _result_summary(path: Path, experiment, representation: str) -> dict[str, Any]:
     records = []
     with path.open(encoding="utf-8") as stream:
@@ -591,6 +637,7 @@ def _result_summary(path: Path, experiment, representation: str) -> dict[str, An
         "representation": representation,
         "record_count": len(records),
         "failure_count": failures,
+        "workload_timing": _attempt_timing_summary(records),
         "result_file": path.name,
     }
 
