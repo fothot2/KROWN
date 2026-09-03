@@ -521,7 +521,9 @@ def _compact_result_file(path: Path) -> None:
 def _publish_result_bundle(
         run_directory: Path, summary_path: Path, archive_path: Path,
         experiments: list[dict[str, Any]], status: str,
-        failed_system: str | None = None, error: str | None = None) -> None:
+        failed_system: str | None = None, error: str | None = None,
+        matrix_started_ns: int | None = None,
+        matrix_stages_ns: Mapping[str, int] | None = None) -> None:
     """Publish one compact atomic summary and archive."""
     summary = {"status": status, "experiments": experiments}
     if failed_system is not None:
@@ -531,10 +533,30 @@ def _publish_result_bundle(
     summary_temporary = temporary_output(summary_path)
     archive_temporary = temporary_output(archive_path)
     try:
-        _atomic_json(summary_temporary, summary)
+        archive_started_ns = time.perf_counter_ns()
         with tarfile.open(archive_temporary, "w:gz") as archive:
             for path in sorted(run_directory.glob("*.jsonl")):
                 archive.add(path, arcname=path.name, recursive=False)
+        archive_ns = time.perf_counter_ns() - archive_started_ns
+        if matrix_started_ns is not None:
+            stages = dict(matrix_stages_ns or {})
+            stages["archive"] = archive_ns
+            total_wall_ns = time.perf_counter_ns() - matrix_started_ns
+            classified_ns = sum(stages.values())
+            if classified_ns > total_wall_ns:
+                raise RuntimeError(
+                    "matrix timing stages exceed matrix wall total"
+                )
+            stages["unclassified"] = total_wall_ns - classified_ns
+            summary["matrix_timing"] = {
+                "schema": "rdf-matrix-timing-v1",
+                "clock": "perf_counter_ns",
+                "stages_ns": stages,
+                "stages_sum_ns": sum(stages.values()),
+                "total_wall_ns": total_wall_ns,
+                "reconciled": sum(stages.values()) == total_wall_ns,
+            }
+        _atomic_json(summary_temporary, summary)
         commit_output(summary_temporary, summary_path)
         summary_temporary = None
         commit_output(archive_temporary, archive_path)
@@ -672,15 +694,19 @@ class RdfExperimentMatrixResource:
                     "selected_systems and selected_systems_env are mutually exclusive"
                 )
             selection = selected_systems if selected_systems is not None else environment_selection
+            preflight_started_ns = time.perf_counter_ns()
             _runtime_preflight(
                 declaration_path, manifest_path, adapter_options,
                 adapter_option_env, selected_systems=selection,
             )
+            preflight_ns = time.perf_counter_ns() - preflight_started_ns
             experiments, original_artifacts = load_rdf_experiment_declaration(
                 declaration_path)
             experiments = _selected_experiments(experiments, selection)
+            artifact_started_ns = time.perf_counter_ns()
             artifacts = _stage_artifacts(
                 declaration_path, original_artifacts, self._shared)
+            artifact_ns = time.perf_counter_ns() - artifact_started_ns
             specifications = {
                 item.system_id: item for item in system_adapter_specifications()
             }
@@ -698,6 +724,7 @@ class RdfExperimentMatrixResource:
             run_directory = Path(tempfile.mkdtemp(
                 prefix="rdf-matrix-", dir=self._shared))
             summaries = []
+            execution_started_ns = time.perf_counter_ns()
             for experiment in experiments:
                 system_started_ns = time.perf_counter_ns()
                 measured_started_ns = system_started_ns
@@ -831,6 +858,7 @@ class RdfExperimentMatrixResource:
                         f"{summary['failure_count']} failed query attempts"
                     )
 
+            execution_ns = time.perf_counter_ns() - execution_started_ns
             summary_path = resolve_shared_path(
                 str(self._shared), results_file, "Output")
             archive_path = resolve_shared_path(
@@ -842,17 +870,15 @@ class RdfExperimentMatrixResource:
                 "ok" if query_failure_count == 0
                 else "completed_with_failures"
             )
-            archive_started_ns = time.perf_counter_ns()
             _publish_result_bundle(
                 run_directory, summary_path, archive_path, summaries,
                 matrix_status,
-            )
-            archive_ns = time.perf_counter_ns() - archive_started_ns
-            matrix_total_wall_ns = time.perf_counter_ns() - matrix_started_ns
-            self._logger.info(
-                "RDF matrix timing "
-                f"clock=perf_counter_ns total_wall_ns={matrix_total_wall_ns} "
-                f"archive_ns={archive_ns}"
+                matrix_started_ns=matrix_started_ns,
+                matrix_stages_ns={
+                    "preflight": preflight_ns,
+                    "artifact_open_or_load": artifact_ns,
+                    "measured": execution_ns,
+                },
             )
             if failure_results_file is not None and failure_output_file is not None:
                 stale_summary = resolve_shared_path(
