@@ -790,6 +790,7 @@ class RdfExperimentMatrixResource:
                 module = __import__(module_name, fromlist=[class_name])
                 adapter_class = getattr(module, class_name)
                 adapter = None
+                lifecycle_stages_ns: dict[str, int] | None = None
                 strategy = _execution_strategy(specification)
                 if strategy == "sparql-http":
                     arguments = _constructor_arguments(
@@ -818,6 +819,25 @@ class RdfExperimentMatrixResource:
                         measured_runs=int(policy["measured_runs"]),
                         correctness_mode="fingerprint",
                     ))
+                    lifecycle_stages_ns = {
+                        "preflight": 0,
+                        "artifact_open_or_load": lifecycle.operation_timings_ns.get(
+                            "prepare", 0
+                        ),
+                        "engine_startup": (
+                            lifecycle.operation_timings_ns.get("start", 0)
+                            + lifecycle.operation_timings_ns.get("ready", 0)
+                        ),
+                        "warmup": 0,
+                        "measured": lifecycle.operation_timings_ns.get("execute", 0),
+                        "engine_shutdown": lifecycle.operation_timings_ns.get(
+                            "stop", 0
+                        ),
+                        "validation": lifecycle.operation_timings_ns.get(
+                            "collect", 0
+                        ),
+                        "archive": 0,
+                    }
                     if not lifecycle.success:
                         raise RuntimeError(
                             f"system lifecycle failed for {system_id}: {lifecycle.error}"
@@ -870,23 +890,27 @@ class RdfExperimentMatrixResource:
                 _compact_result_file(output_path)
                 validation_ns = time.perf_counter_ns() - validation_started_ns
                 total_wall_ns = time.perf_counter_ns() - system_started_ns
-                classified_ns = measured_ns + validation_ns
+                if lifecycle_stages_ns is None:
+                    system_stages_ns = {
+                        "preflight": 0,
+                        "artifact_open_or_load": 0,
+                        "engine_startup": 0,
+                        "warmup": 0,
+                        "measured": measured_ns,
+                        "engine_shutdown": 0,
+                        "validation": validation_ns,
+                        "archive": 0,
+                    }
+                else:
+                    system_stages_ns = dict(lifecycle_stages_ns)
+                    system_stages_ns["validation"] += validation_ns
+                classified_ns = sum(system_stages_ns.values())
                 unclassified_ns = total_wall_ns - classified_ns
                 if unclassified_ns < 0:
                     raise RuntimeError(
                         f"system timing stages exceed wall total for {system_id}"
                     )
-                system_stages_ns = {
-                    "preflight": 0,
-                    "artifact_open_or_load": 0,
-                    "engine_startup": 0,
-                    "warmup": 0,
-                    "measured": measured_ns,
-                    "engine_shutdown": 0,
-                    "validation": validation_ns,
-                    "archive": 0,
-                    "unclassified": unclassified_ns,
-                }
+                system_stages_ns["unclassified"] = unclassified_ns
                 summary["system_timing"] = {
                     "schema": "rdf-system-timing-v1",
                     "clock": "perf_counter_ns",
