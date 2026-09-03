@@ -273,6 +273,7 @@ class _RdfQueryBenchmark:
             raise TypeError('progress must be a boolean')
         self._progress = progress
         self._progress_stream = sys.stderr if progress_stream is None else progress_stream
+        self.last_lifecycle_timing: dict[str, Any] | None = None
 
     @staticmethod
     def _adapter_progress(adapter):
@@ -385,9 +386,17 @@ class _RdfQueryBenchmark:
                     )
                 record[key] = value
         except BaseException as error:
+            attempt_ns = time.perf_counter_ns() - start_ns
             record.update({
                 'status': _status_for_exception(error),
-                'elapsed_ns': time.perf_counter_ns() - start_ns,
+                'elapsed_ns': attempt_ns,
+                'client_elapsed_ns': attempt_ns,
+                'attempt_elapsed_ns': attempt_ns,
+                'timing_clock': 'perf_counter_ns',
+                'timing_schema': 'rdf-attempt-timing-v1',
+                'timing_stages_ns': {'dispatch': attempt_ns},
+                'timing_stages_sum_ns': attempt_ns,
+                'timing_reconciled': True,
                 'error_type': type(error).__name__,
                 'error_message': str(error),
             })
@@ -400,11 +409,16 @@ class _RdfQueryBenchmark:
         skip_reasons: dict[str, tuple[str, str]] = {}
         shared_adapter = None
         phase_index = 0
+        run_started_ns = time.perf_counter_ns()
+        open_ns = 0
+        close_ns = 0
 
         try:
             if self._lifecycle == 'shared':
                 shared_adapter = self._adapter_factory()
+                open_started_ns = time.perf_counter_ns()
                 shared_adapter.open()
+                open_ns += time.perf_counter_ns() - open_started_ns
 
             if self._manifest.schedule is not None:
                 phase_field = self._manifest.schedule['phase_field']
@@ -439,6 +453,13 @@ class _RdfQueryBenchmark:
                         record.update({
                             'status': 'skipped',
                             'elapsed_ns': None,
+                            'client_elapsed_ns': 0,
+                            'attempt_elapsed_ns': 0,
+                            'timing_clock': 'perf_counter_ns',
+                            'timing_schema': 'rdf-attempt-timing-v1',
+                            'timing_stages_ns': {'dispatch': 0},
+                            'timing_stages_sum_ns': 0,
+                            'timing_reconciled': True,
                             'error_type': reason_type,
                             'error_message': reason_message,
                         })
@@ -449,7 +470,9 @@ class _RdfQueryBenchmark:
                     try:
                         if self._lifecycle == 'per_attempt':
                             adapter = self._adapter_factory()
+                            open_started_ns = time.perf_counter_ns()
                             adapter.open()
+                            open_ns += time.perf_counter_ns() - open_started_ns
                         self._progress_line(
                             'start', ordinal, total_attempts, record, adapter,
                             failure_count,
@@ -457,7 +480,9 @@ class _RdfQueryBenchmark:
                         record = self._execute_attempt(adapter, query, record)
                     finally:
                         if self._lifecycle == 'per_attempt' and adapter is not None:
+                            close_started_ns = time.perf_counter_ns()
                             adapter.close()
+                            close_ns += time.perf_counter_ns() - close_started_ns
                     if record['status'] not in {'ok', 'skipped', 'unsupported'}:
                         failure_count += 1
                     self._progress_line(
@@ -481,7 +506,35 @@ class _RdfQueryBenchmark:
                             )
         finally:
             if shared_adapter is not None:
+                close_started_ns = time.perf_counter_ns()
                 shared_adapter.close()
+                close_ns += time.perf_counter_ns() - close_started_ns
+
+        warmup_ns = sum(
+            int(record.get('attempt_elapsed_ns') or 0)
+            for record in records if record.get('phase') == 'warmup'
+        )
+        measured_ns = sum(
+            int(record.get('attempt_elapsed_ns') or 0)
+            for record in records if record.get('phase') == 'measured'
+        )
+        total_wall_ns = time.perf_counter_ns() - run_started_ns
+        classified_ns = open_ns + warmup_ns + measured_ns + close_ns
+        if classified_ns > total_wall_ns:
+            raise RuntimeError('query lifecycle stages exceed total wall time')
+        self.last_lifecycle_timing = {
+            'schema': 'rdf-query-lifecycle-timing-v1',
+            'clock': 'perf_counter_ns',
+            'stages_ns': {
+                'artifact_open_or_load': open_ns,
+                'warmup': warmup_ns,
+                'measured': measured_ns,
+                'engine_shutdown': close_ns,
+                'unclassified': total_wall_ns - classified_ns,
+            },
+            'total_wall_ns': total_wall_ns,
+            'reconciled': True,
+        }
 
         output_records = []
         for record in records:

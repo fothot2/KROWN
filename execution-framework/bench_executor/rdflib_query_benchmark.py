@@ -169,8 +169,12 @@ def _rdflib_worker(connection, engine: str, artifact_path: str,
                 query = request['query']
                 started_ns = time.perf_counter_ns()
                 result = graph.query(query)
+                execute_ns = time.perf_counter_ns() - started_ns
+                materialize_started_ns = time.perf_counter_ns()
                 rows = list(result)
-                elapsed_ns = time.perf_counter_ns() - started_ns
+                materialize_ns = time.perf_counter_ns() - materialize_started_ns
+                correctness_started_ns = time.perf_counter_ns()
+                elapsed_ns = execute_ns + materialize_ns
                 response = {
                     'kind': 'result',
                     'request_id': request_id,
@@ -198,6 +202,12 @@ def _rdflib_worker(connection, engine: str, artifact_path: str,
                         response['metadata']['full_result_retained'] = retained
                         if retained:
                             response['metadata']['normalized_result'] = normalized
+                correctness_ns = time.perf_counter_ns() - correctness_started_ns
+                response['stage_timings_ns'] = {
+                    'engine_execute': execute_ns,
+                    'result_materialize': materialize_ns,
+                    'correctness': correctness_ns,
+                }
                 connection.send(response)
             except BaseException as error:
                 connection.send({
@@ -376,6 +386,7 @@ class _WorkerRdfLibAdapter(_RdfQueryAdapter):
             result_fingerprint=message.get('result_fingerprint'),
             elapsed_ns=message.get('elapsed_ns'),
             metadata=message.get('metadata', {}),
+            stage_timings_ns=message.get('stage_timings_ns', {}),
         )
 
     def close(self) -> None:
@@ -397,6 +408,7 @@ class RdfLibQueryBenchmark:
         self._data_path = os.path.abspath(data_path)
         self._shared_directory = os.path.join(self._data_path, 'shared')
         self._logger = Logger(__name__, directory, verbose)
+        self.last_lifecycle_timing = None
         os.umask(0)
         os.makedirs(self._shared_directory, exist_ok=True)
 
@@ -486,6 +498,7 @@ class RdfLibQueryBenchmark:
                 skip_after_warmup_error=skip_after_warmup_error,
             )
             records = benchmark.run(output_path)
+            self.last_lifecycle_timing = benchmark.last_lifecycle_timing
             failures = sum(
                 record['status'] not in {'ok', 'skipped', 'unsupported'}
                 for record in records

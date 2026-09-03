@@ -866,6 +866,24 @@ class RdfExperimentMatrixResource:
                     if not query.execute(**query_parameters):
                         raise RuntimeError(
                             f"RDFLib-backed execution failed for {system_id}")
+                    query_lifecycle = query.last_lifecycle_timing
+                    if not isinstance(query_lifecycle, dict):
+                        raise RuntimeError(
+                            f"RDFLib lifecycle timing is missing for {system_id}"
+                        )
+                    query_stages = query_lifecycle["stages_ns"]
+                    lifecycle_stages_ns = {
+                        "preflight": 0,
+                        "artifact_open_or_load": query_stages[
+                            "artifact_open_or_load"
+                        ],
+                        "engine_startup": 0,
+                        "warmup": query_stages["warmup"],
+                        "measured": query_stages["measured"],
+                        "engine_shutdown": query_stages["engine_shutdown"],
+                        "validation": 0,
+                        "archive": 0,
+                    }
                 elif strategy == "persistent-jsonl":
                     adapter = adapter_class(**dict(options.get(system_id, {})))
                     _run_file_backed(
