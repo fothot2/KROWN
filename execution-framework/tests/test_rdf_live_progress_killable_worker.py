@@ -97,5 +97,23 @@ class LiveProgressTests(unittest.TestCase):
         self.assertEqual(sum(timing["stages_ns"].values()), timing["total_wall_ns"])
 
 
+    def test_resource_metrics_and_execution_mode_are_reported(self):
+        manifest = _QueryManifest("w", "d", (_QuerySpec("q", "ASK {}"),))
+        with tempfile.TemporaryDirectory() as directory:
+            benchmark = _RdfQueryBenchmark(
+                ObservableAdapter, "e", "s", manifest,
+                warmup_runs=0, measured_runs=1, progress=False,
+            )
+            benchmark.run(str(Path(directory) / "results.jsonl"))
+        lifecycle = benchmark.last_lifecycle_timing
+        metrics = lifecycle["resource_metrics"]
+        self.assertEqual(metrics["schema"], "rdf-resource-metrics-v1")
+        self.assertGreaterEqual(metrics["max_rss_kib"], 0)
+        self.assertGreaterEqual(metrics["user_cpu_ns"], 0)
+        self.assertEqual(
+            lifecycle["execution_mode"]["process_temperature"], "warm-process"
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

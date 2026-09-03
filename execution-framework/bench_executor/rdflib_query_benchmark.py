@@ -3,6 +3,7 @@
 
 import multiprocessing as mp
 import os
+import resource
 import time
 import traceback
 from pathlib import Path
@@ -159,7 +160,19 @@ def _rdflib_worker(connection, engine: str, artifact_path: str,
         graph = _make_rdflib_graph(
             engine, artifact_path, vortex_layout
         )
-        connection.send({'kind': 'ready'})
+        usage = resource.getrusage(resource.RUSAGE_SELF)
+        connection.send({
+            'kind': 'ready',
+            'resource_metrics': {
+                'max_rss_kib': int(usage.ru_maxrss),
+                'user_cpu_ns': int(usage.ru_utime * 1_000_000_000),
+                'system_cpu_ns': int(usage.ru_stime * 1_000_000_000),
+                'major_page_faults': int(usage.ru_majflt),
+                'minor_page_faults': int(usage.ru_minflt),
+                'input_blocks': int(usage.ru_inblock),
+                'output_blocks': int(usage.ru_oublock),
+            },
+        })
         while True:
             request = connection.recv()
             if request.get('kind') == 'shutdown':
@@ -289,6 +302,11 @@ class _WorkerRdfLibAdapter(_RdfQueryAdapter):
         self._process = None
         self._next_request_id = 0
         self._worker_starts = 0
+        self._startup_resource_metrics = None
+
+    @property
+    def startup_resource_metrics(self):
+        return self._startup_resource_metrics
 
     def progress_metadata(self):
         process = self._process
@@ -342,6 +360,7 @@ class _WorkerRdfLibAdapter(_RdfQueryAdapter):
             error = message.get('error_message', 'unknown startup error')
             self._discard()
             raise RuntimeError(f'RDFLib worker startup failed: {error}')
+        self._startup_resource_metrics = message.get('resource_metrics')
 
     def execute(self, query: str) -> _QueryOutcome:
         if (self._connection is None or self._process is None
@@ -499,6 +518,11 @@ class RdfLibQueryBenchmark:
             )
             records = benchmark.run(output_path)
             self.last_lifecycle_timing = benchmark.last_lifecycle_timing
+            self.last_lifecycle_timing['execution_mode'].update({
+                'storage': 'in-memory' if engine == 'default' else 'file-backed',
+                'engine': engine,
+                'timeout_mode': timeout_mode,
+            })
             failures = sum(
                 record['status'] not in {'ok', 'skipped', 'unsupported'}
                 for record in records

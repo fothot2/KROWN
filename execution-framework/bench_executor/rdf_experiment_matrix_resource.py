@@ -791,6 +791,8 @@ class RdfExperimentMatrixResource:
                 adapter_class = getattr(module, class_name)
                 adapter = None
                 lifecycle_stages_ns: dict[str, int] | None = None
+                resource_metrics = None
+                execution_mode = None
                 strategy = _execution_strategy(specification)
                 if strategy == "sparql-http":
                     arguments = _constructor_arguments(
@@ -819,6 +821,12 @@ class RdfExperimentMatrixResource:
                         measured_runs=int(policy["measured_runs"]),
                         correctness_mode="fingerprint",
                     ))
+                    resource_metrics = benchmark.last_lifecycle_timing[
+                        "resource_metrics"
+                    ]
+                    execution_mode = benchmark.last_lifecycle_timing[
+                        "execution_mode"
+                    ]
                     lifecycle_stages_ns = {
                         "preflight": 0,
                         "artifact_open_or_load": lifecycle.operation_timings_ns.get(
@@ -872,6 +880,8 @@ class RdfExperimentMatrixResource:
                             f"RDFLib lifecycle timing is missing for {system_id}"
                         )
                     query_stages = query_lifecycle["stages_ns"]
+                    resource_metrics = query_lifecycle["resource_metrics"]
+                    execution_mode = query_lifecycle["execution_mode"]
                     lifecycle_stages_ns = {
                         "preflight": 0,
                         "artifact_open_or_load": query_stages[
@@ -929,6 +939,11 @@ class RdfExperimentMatrixResource:
                         f"system timing stages exceed wall total for {system_id}"
                     )
                 system_stages_ns["unclassified"] = unclassified_ns
+                summary["resource_metrics"] = resource_metrics
+                summary["execution_mode"] = execution_mode or {
+                    "storage": specification.configuration.kind,
+                    "process_temperature": "warm-process",
+                }
                 summary["system_timing"] = {
                     "schema": "rdf-system-timing-v1",
                     "clock": "perf_counter_ns",

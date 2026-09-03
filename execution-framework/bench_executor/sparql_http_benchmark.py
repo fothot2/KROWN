@@ -192,10 +192,10 @@ class _SparqlHttpAdapter(_RdfQueryAdapter):
         return _QueryOutcome(
             result_count=result_count,
             result_fingerprint=fingerprint,
-            elapsed_ns=elapsed_ns,
+            elapsed_ns=execute_ns,
             metadata=metadata,
             stage_timings_ns={
-                'engine_execute': elapsed_ns,
+                'engine_execute': execute_ns,
                 'correctness': processing_ns,
             },
         )
@@ -214,6 +214,7 @@ class SparqlHttpBenchmark:
         self._data_path = os.path.abspath(data_path)
         self._shared_directory = os.path.join(self._data_path, 'shared')
         self._logger = Logger(__name__, directory, verbose)
+        self.last_lifecycle_timing = None
         os.umask(0)
         os.makedirs(self._shared_directory, exist_ok=True)
 
@@ -276,6 +277,11 @@ class SparqlHttpBenchmark:
                 skip_after_warmup_error=skip_after_warmup_error,
             )
             records = benchmark.run(output_path)
+            self.last_lifecycle_timing = benchmark.last_lifecycle_timing
+            self.last_lifecycle_timing['execution_mode'].update({
+                'storage': 'server-managed',
+                'transport': 'sparql-http',
+            })
             failures = sum(
                 record['status'] not in {'ok', 'skipped', 'unsupported'}
                 for record in records

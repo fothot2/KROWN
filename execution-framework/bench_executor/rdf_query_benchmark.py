@@ -4,6 +4,7 @@
 import dataclasses
 import json
 import random
+import resource
 import sys
 import time
 import traceback
@@ -31,6 +32,31 @@ class _QueryParseError(RuntimeError):
 
 class _ResultProcessingError(RuntimeError):
     """Report a failure while consuming query results."""
+
+
+def _resource_snapshot() -> dict[str, int]:
+    """Read cumulative resource use for this process and finished children."""
+    own = resource.getrusage(resource.RUSAGE_SELF)
+    children = resource.getrusage(resource.RUSAGE_CHILDREN)
+    return {
+        'user_cpu_ns': int((own.ru_utime + children.ru_utime) * 1_000_000_000),
+        'system_cpu_ns': int((own.ru_stime + children.ru_stime) * 1_000_000_000),
+        'major_page_faults': int(own.ru_majflt + children.ru_majflt),
+        'minor_page_faults': int(own.ru_minflt + children.ru_minflt),
+        'input_blocks': int(own.ru_inblock + children.ru_inblock),
+        'output_blocks': int(own.ru_oublock + children.ru_oublock),
+        'max_rss_kib': int(max(own.ru_maxrss, children.ru_maxrss)),
+    }
+
+
+def _resource_delta(before: Mapping[str, int], after: Mapping[str, int]) -> dict[str, int]:
+    """Return non-negative resource deltas and the observed peak RSS."""
+    result = {
+        key: max(0, after[key] - before[key])
+        for key in before if key != 'max_rss_kib'
+    }
+    result['max_rss_kib'] = max(before['max_rss_kib'], after['max_rss_kib'])
+    return result
 
 
 @dataclasses.dataclass(frozen=True)
@@ -410,6 +436,7 @@ class _RdfQueryBenchmark:
         shared_adapter = None
         phase_index = 0
         run_started_ns = time.perf_counter_ns()
+        resource_before = _resource_snapshot()
         open_ns = 0
         close_ns = 0
 
@@ -522,6 +549,7 @@ class _RdfQueryBenchmark:
         classified_ns = open_ns + warmup_ns + measured_ns + close_ns
         if classified_ns > total_wall_ns:
             raise RuntimeError('query lifecycle stages exceed total wall time')
+        resource_metrics = _resource_delta(resource_before, _resource_snapshot())
         self.last_lifecycle_timing = {
             'schema': 'rdf-query-lifecycle-timing-v1',
             'clock': 'perf_counter_ns',
@@ -534,6 +562,17 @@ class _RdfQueryBenchmark:
             },
             'total_wall_ns': total_wall_ns,
             'reconciled': True,
+            'resource_metrics': {
+                'schema': 'rdf-resource-metrics-v1',
+                **resource_metrics,
+            },
+            'execution_mode': {
+                'process_temperature': (
+                    'warm-process' if self._lifecycle == 'shared'
+                    else 'cold-process-per-attempt'
+                ),
+                'lifecycle': self._lifecycle,
+            },
         }
 
         output_records = []
