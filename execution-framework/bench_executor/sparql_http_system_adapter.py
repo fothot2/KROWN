@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import abc
 import dataclasses
+import time
 from collections.abc import Callable
 from typing import Any
 
@@ -41,6 +42,7 @@ def sparql_http_system_specifications() -> tuple[SystemAdapterSpecification, ...
             configuration=system_configuration,
             adapter=adapter,
             capabilities=LifecycleCapabilities.for_kind('server'),
+            parameters={"execution_strategy": "sparql-http"},
         ))
     return tuple(specifications)
 
@@ -56,6 +58,8 @@ class SparqlHttpRunResult:
     error: str | None = None
     stop_attempted: bool = False
     collect_attempted: bool = False
+    operation_timings_ns: dict[str, int] = dataclasses.field(default_factory=dict)
+    total_wall_ns: int = 0
 
     @property
     def success(self) -> bool:
@@ -114,6 +118,8 @@ class SparqlHttpSystemAdapter(abc.ABC):
             raise TypeError('execute must be callable')
 
         tracker = LifecycleTracker(self.specification)
+        lifecycle_started_ns = time.perf_counter_ns()
+        operation_timings_ns: dict[str, int] = {}
         start_attempted = False
         stop_attempted = False
         collect_attempted = False
@@ -134,6 +140,7 @@ class SparqlHttpSystemAdapter(abc.ABC):
                 stop_attempted = True
             if operation == LifecycleOperation.COLLECT:
                 collect_attempted = True
+            operation_started_ns = time.perf_counter_ns()
             try:
                 succeeded = action()
                 if not isinstance(succeeded, bool):
@@ -142,18 +149,31 @@ class SparqlHttpSystemAdapter(abc.ABC):
                     raise RuntimeError(f'{operation.value} returned false')
                 tracker.advance(operation)
             except Exception as error:
+                operation_timings_ns[operation.value] = (
+                    time.perf_counter_ns() - operation_started_ns
+                )
                 if operation != LifecycleOperation.STOP and start_attempted:
                     stop_attempted = True
+                    cleanup_started_ns = time.perf_counter_ns()
                     try:
                         self.stop()
                     except Exception:
                         pass
+                    operation_timings_ns[LifecycleOperation.STOP.value] = (
+                        operation_timings_ns.get(LifecycleOperation.STOP.value, 0)
+                        + time.perf_counter_ns() - cleanup_started_ns
+                    )
                 if operation != LifecycleOperation.COLLECT:
                     collect_attempted = True
+                    cleanup_started_ns = time.perf_counter_ns()
                     try:
                         self.collect()
                     except Exception:
                         pass
+                    operation_timings_ns[LifecycleOperation.COLLECT.value] = (
+                        operation_timings_ns.get(LifecycleOperation.COLLECT.value, 0)
+                        + time.perf_counter_ns() - cleanup_started_ns
+                    )
                 tracker.fail()
                 return SparqlHttpRunResult(
                     system_id=self.specification.system_id,
@@ -163,6 +183,14 @@ class SparqlHttpSystemAdapter(abc.ABC):
                     error=f'{type(error).__name__}: {error}',
                     stop_attempted=stop_attempted,
                     collect_attempted=collect_attempted,
+                    operation_timings_ns=operation_timings_ns,
+                    total_wall_ns=(
+                        time.perf_counter_ns() - lifecycle_started_ns
+                    ),
+                )
+            else:
+                operation_timings_ns[operation.value] = (
+                    time.perf_counter_ns() - operation_started_ns
                 )
 
         return SparqlHttpRunResult(
@@ -171,4 +199,6 @@ class SparqlHttpSystemAdapter(abc.ABC):
             history=tuple(tracker.history),
             stop_attempted=stop_attempted,
             collect_attempted=collect_attempted,
+            operation_timings_ns=operation_timings_ns,
+            total_wall_ns=time.perf_counter_ns() - lifecycle_started_ns,
         )
