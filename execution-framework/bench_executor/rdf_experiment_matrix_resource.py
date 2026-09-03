@@ -465,7 +465,9 @@ def _run_file_backed(
         measured_runs=int(policy["measured_runs"]),
     )
     benchmark.run(str(output_path))
-    return True
+    if not isinstance(benchmark.last_lifecycle_timing, dict):
+        raise RuntimeError(f"lifecycle timing is missing for {system_id}")
+    return benchmark.last_lifecycle_timing
 
 
 _COMPACT_RESULT_FIELDS = (
@@ -821,12 +823,20 @@ class RdfExperimentMatrixResource:
                         measured_runs=int(policy["measured_runs"]),
                         correctness_mode="fingerprint",
                     ))
-                    resource_metrics = benchmark.last_lifecycle_timing[
-                        "resource_metrics"
-                    ]
-                    execution_mode = benchmark.last_lifecycle_timing[
-                        "execution_mode"
-                    ]
+                    query_lifecycle = benchmark.last_lifecycle_timing
+                    if not isinstance(query_lifecycle, dict):
+                        raise RuntimeError(
+                            f"SPARQL lifecycle timing is missing for {system_id}"
+                        )
+                    query_stages = query_lifecycle["stages_ns"]
+                    resource_metrics = query_lifecycle["resource_metrics"]
+                    execution_mode = query_lifecycle["execution_mode"]
+                    execute_wall_ns = lifecycle.operation_timings_ns.get("execute", 0)
+                    query_classified_ns = sum(query_stages.values())
+                    if query_classified_ns > execute_wall_ns:
+                        raise RuntimeError(
+                            f"query lifecycle exceeds server execute time for {system_id}"
+                        )
                     lifecycle_stages_ns = {
                         "preflight": 0,
                         "artifact_open_or_load": lifecycle.operation_timings_ns.get(
@@ -835,17 +845,22 @@ class RdfExperimentMatrixResource:
                         "engine_startup": (
                             lifecycle.operation_timings_ns.get("start", 0)
                             + lifecycle.operation_timings_ns.get("ready", 0)
+                            + query_stages["artifact_open_or_load"]
                         ),
-                        "warmup": 0,
-                        "measured": lifecycle.operation_timings_ns.get("execute", 0),
-                        "engine_shutdown": lifecycle.operation_timings_ns.get(
-                            "stop", 0
+                        "warmup": query_stages["warmup"],
+                        "measured": query_stages["measured"],
+                        "engine_shutdown": (
+                            lifecycle.operation_timings_ns.get("stop", 0)
+                            + query_stages["engine_shutdown"]
                         ),
                         "validation": lifecycle.operation_timings_ns.get(
                             "collect", 0
                         ),
                         "archive": 0,
                     }
+                    lifecycle_stages_ns["validation"] += (
+                        execute_wall_ns - query_classified_ns
+                    )
                     if not lifecycle.success:
                         raise RuntimeError(
                             f"system lifecycle failed for {system_id}: {lifecycle.error}"
@@ -896,10 +911,27 @@ class RdfExperimentMatrixResource:
                     }
                 elif strategy == "persistent-jsonl":
                     adapter = adapter_class(**dict(options.get(system_id, {})))
-                    _run_file_backed(
+                    query_lifecycle = _run_file_backed(
                         adapter, self._shared / artifact.files[0].path,
                         manifest_path, output_path, experiment, system_id,
                     )
+                    query_stages = query_lifecycle["stages_ns"]
+                    resource_metrics = query_lifecycle["resource_metrics"]
+                    execution_mode = dict(query_lifecycle["execution_mode"])
+                    execution_mode.update({
+                        "storage": "file-backed",
+                        "engine": "comunica-hdt",
+                    })
+                    lifecycle_stages_ns = {
+                        "preflight": 0,
+                        "artifact_open_or_load": 0,
+                        "engine_startup": query_stages["artifact_open_or_load"],
+                        "warmup": query_stages["warmup"],
+                        "measured": query_stages["measured"],
+                        "engine_shutdown": query_stages["engine_shutdown"],
+                        "validation": 0,
+                        "archive": 0,
+                    }
                 else:
                     raise ValueError(
                         f"no generic execution strategy for {system_id}")

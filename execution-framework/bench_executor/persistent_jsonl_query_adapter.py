@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import select
 import subprocess
+import time
 import uuid
 from pathlib import Path
 
@@ -133,6 +134,7 @@ class PersistentJsonlQueryAdapter(_RdfQueryAdapter):
             "request_id": request_id,
             "query": query,
         }
+        ipc_started_ns = time.perf_counter_ns()
         try:
             process.stdin.write(
                 json.dumps(request, separators=(",", ":")) + "\n"
@@ -161,12 +163,15 @@ class PersistentJsonlQueryAdapter(_RdfQueryAdapter):
             raise RuntimeError(
                 f"invalid persistent worker response: {message!r}"
             )
+        ipc_ns = time.perf_counter_ns() - ipc_started_ns
         if message.get("status") != "ok":
             raise RuntimeError(
                 f"{message.get('error_type', 'WorkerError')}: "
                 f"{message.get('error_message', 'unknown worker error')}"
             )
+        correctness_started_ns = time.perf_counter_ns()
         normalized = self._normalizer(message["document"], query)
+        correctness_ns = time.perf_counter_ns() - correctness_started_ns
         metadata = {
             key: value for key, value in normalized.items()
             if key not in {
@@ -179,7 +184,12 @@ class PersistentJsonlQueryAdapter(_RdfQueryAdapter):
         return _QueryOutcome(
             result_count=normalized["result_count"],
             result_fingerprint=normalized["result_fingerprint"],
+            elapsed_ns=ipc_ns + correctness_ns,
             metadata=metadata,
+            stage_timings_ns={
+                "ipc": ipc_ns,
+                "correctness": correctness_ns,
+            },
         )
 
     def close(self):
