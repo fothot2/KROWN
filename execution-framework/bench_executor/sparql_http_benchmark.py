@@ -150,8 +150,9 @@ class _SparqlHttpAdapter(_RdfQueryAdapter):
             ) from error
         except requests.ConnectionError as error:
             raise ConnectionError(str(error)) from error
-        elapsed_ns = time.perf_counter_ns() - started_ns
+        execute_ns = time.perf_counter_ns() - started_ns
         response.raise_for_status()
+        processing_started_ns = time.perf_counter_ns()
 
         content_type = response.headers.get('Content-Type', '')
         media_type = content_type.split(';', 1)[0].strip().lower()
@@ -187,11 +188,16 @@ class _SparqlHttpAdapter(_RdfQueryAdapter):
             metadata['full_result_retained'] = retained
             if retained:
                 metadata['normalized_result'] = full_result
+        processing_ns = time.perf_counter_ns() - processing_started_ns
         return _QueryOutcome(
             result_count=result_count,
             result_fingerprint=fingerprint,
             elapsed_ns=elapsed_ns,
             metadata=metadata,
+            stage_timings_ns={
+                'engine_execute': elapsed_ns,
+                'correctness': processing_ns,
+            },
         )
 
     def close(self) -> None:

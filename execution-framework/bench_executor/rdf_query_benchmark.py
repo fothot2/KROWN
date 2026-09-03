@@ -4,6 +4,7 @@
 import dataclasses
 import json
 import random
+import sys
 import time
 import traceback
 from collections.abc import Callable, Mapping, Sequence
@@ -65,6 +66,7 @@ class _QueryOutcome:
     result_fingerprint: str | None = None
     elapsed_ns: int | None = None
     metadata: Mapping[str, Any] = dataclasses.field(default_factory=dict)
+    stage_timings_ns: Mapping[str, int] = dataclasses.field(default_factory=dict)
 
     def __post_init__(self):
         if (not isinstance(self.result_count, int)
@@ -77,6 +79,11 @@ class _QueryOutcome:
             raise ValueError(
                 'result_fingerprint must be null or a non-empty string'
             )
+        for stage, value in self.stage_timings_ns.items():
+            if not isinstance(stage, str) or not stage:
+                raise ValueError('timing stage names must be non-empty strings')
+            if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+                raise ValueError('timing stage values must be non-negative integers')
         if self.elapsed_ns is not None:
             if (not isinstance(self.elapsed_ns, int)
                     or isinstance(self.elapsed_ns, bool)
@@ -107,6 +114,7 @@ class _QueryManifest:
     workload: str
     dataset: str
     queries: tuple[_QuerySpec, ...]
+    schedule: Mapping[str, Any] | None = None
 
 
 def _load_query_manifest(path: str) -> _QueryManifest:
@@ -125,6 +133,17 @@ def _load_query_manifest(path: str) -> _QueryManifest:
     workload = data.get('workload')
     dataset = data.get('dataset')
     raw_queries = data.get('queries')
+    schedule = data.get('schedule')
+    if schedule is not None:
+        if not isinstance(schedule, dict):
+            raise ValueError('manifest schedule must be an object')
+        if schedule.get('schema') != 'rdf-preexpanded-stream-schedule-v1':
+            raise ValueError('unsupported manifest schedule schema')
+        if schedule.get('mode') != 'preexpanded':
+            raise ValueError('manifest schedule mode must be preexpanded')
+        phase_field = schedule.get('phase_field')
+        if not isinstance(phase_field, str) or not phase_field:
+            raise ValueError('manifest schedule phase_field must be non-empty')
     if not isinstance(workload, str) or not workload:
         raise ValueError('manifest workload must be a non-empty string')
     if not isinstance(dataset, str) or not dataset:
@@ -141,6 +160,12 @@ def _load_query_manifest(path: str) -> _QueryManifest:
         if query_id in query_ids:
             raise ValueError(f'Duplicate query_id: {query_id}')
         query_text = raw_query.get('query')
+        if schedule is not None:
+            phase = raw_query.get(schedule['phase_field'])
+            if phase not in {'warmup', 'measured'}:
+                raise ValueError(
+                    f'query {index} has invalid preexpanded phase: {phase!r}'
+                )
         declared_query_sha256 = raw_query.get('query_sha256')
         if declared_query_sha256 is not None:
             if (not isinstance(declared_query_sha256, str)
@@ -171,6 +196,7 @@ def _load_query_manifest(path: str) -> _QueryManifest:
         workload=workload,
         dataset=dataset,
         queries=tuple(queries),
+        schedule=schedule,
     )
 
 
@@ -204,7 +230,9 @@ class _RdfQueryBenchmark:
             seed: int = 42,
             lifecycle: str = 'shared',
             skip_after_warmup_timeout: bool = True,
-            skip_after_warmup_error: bool = True):
+            skip_after_warmup_error: bool = True,
+            progress: bool = True,
+            progress_stream=None):
         if not callable(adapter_factory):
             raise TypeError('adapter_factory must be callable')
         for name, value in (
@@ -219,6 +247,14 @@ class _RdfQueryBenchmark:
                 raise ValueError(f'{name} must be a non-negative integer')
         if measured_runs == 0:
             raise ValueError('measured_runs must be greater than zero')
+        if manifest.schedule is not None:
+            if warmup_runs != 0 or measured_runs != 1:
+                raise ValueError(
+                    'preexpanded schedules require warmup_runs=0 and '
+                    'measured_runs=1'
+                )
+            if shuffle:
+                raise ValueError('preexpanded schedules do not support shuffle')
         if lifecycle not in LIFECYCLE_MODES:
             raise ValueError(f'Unsupported lifecycle: {lifecycle}')
 
@@ -233,6 +269,43 @@ class _RdfQueryBenchmark:
         self._lifecycle = lifecycle
         self._skip_after_warmup_timeout = skip_after_warmup_timeout
         self._skip_after_warmup_error = skip_after_warmup_error
+        if not isinstance(progress, bool):
+            raise TypeError('progress must be a boolean')
+        self._progress = progress
+        self._progress_stream = sys.stderr if progress_stream is None else progress_stream
+
+    @staticmethod
+    def _adapter_progress(adapter):
+        getter = getattr(adapter, 'progress_metadata', None)
+        if not callable(getter):
+            return {}
+        try:
+            value = getter()
+        except Exception:
+            return {}
+        return dict(value) if isinstance(value, Mapping) else {}
+
+    def _progress_line(self, event, ordinal, total, record, adapter,
+                       failures, elapsed_ns=None):
+        if not self._progress:
+            return
+        fields = [
+            'RDF_PROGRESS', event,
+            f'system={self._system}',
+            f'attempt={ordinal}/{total}',
+            f'phase={record["phase"]}',
+        ]
+        if 'stream_position' in record:
+            fields.append(f'position={record["stream_position"]}')
+        fields.append(f'query={record["query_id"]}')
+        if event == 'done':
+            fields.append(f'status={record["status"]}')
+            if elapsed_ns is not None:
+                fields.append(f'elapsed_s={elapsed_ns / 1_000_000_000:.3f}')
+            fields.append(f'failures={failures}')
+        for key, value in sorted(self._adapter_progress(adapter).items()):
+            fields.append(f'{key}={value}')
+        print(' '.join(fields), file=self._progress_stream, flush=True)
 
     def _ordered_queries(self, phase_index: int) -> list[_QuerySpec]:
         queries = list(self._manifest.queries)
@@ -282,12 +355,26 @@ class _RdfQueryBenchmark:
                 raise _ResultProcessingError(
                     'adapter.execute() must return _QueryOutcome'
                 )
+            attempt_ns = elapsed_ns
+            engine_ns = outcome.elapsed_ns if outcome.elapsed_ns is not None else attempt_ns
+            stages = dict(outcome.stage_timings_ns)
+            if not stages:
+                stages['engine_execute'] = engine_ns
+            nested_ns = sum(stages.values())
+            if nested_ns > attempt_ns:
+                raise _ResultProcessingError(
+                    f'adapter timing stages exceed attempt total: {nested_ns} > {attempt_ns}'
+                )
+            stages['dispatch'] = stages.get('dispatch', 0) + attempt_ns - nested_ns
             record.update({
-                'elapsed_ns': (
-                    outcome.elapsed_ns
-                    if outcome.elapsed_ns is not None else elapsed_ns
-                ),
-                'client_elapsed_ns': elapsed_ns,
+                'elapsed_ns': engine_ns,
+                'client_elapsed_ns': attempt_ns,
+                'attempt_elapsed_ns': attempt_ns,
+                'timing_clock': 'perf_counter_ns',
+                'timing_schema': 'rdf-attempt-timing-v1',
+                'timing_stages_ns': stages,
+                'timing_stages_sum_ns': sum(stages.values()),
+                'timing_reconciled': sum(stages.values()) == attempt_ns,
                 'result_count': outcome.result_count,
                 'result_fingerprint': outcome.result_fingerprint,
             })
@@ -319,15 +406,31 @@ class _RdfQueryBenchmark:
                 shared_adapter = self._adapter_factory()
                 shared_adapter.open()
 
-            phases: Sequence[tuple[str, int]] = (
-                [('warmup', run) for run in range(self._warmup_runs)]
-                + [('measured', run) for run in range(self._measured_runs)]
-            )
-            for phase, run in phases:
-                phase_seed = self._seed + phase_index
-                ordered_queries = self._ordered_queries(phase_index)
-                phase_index += 1
-                for order, query in enumerate(ordered_queries):
+            if self._manifest.schedule is not None:
+                phase_field = self._manifest.schedule['phase_field']
+                attempts = [
+                    (query.metadata[phase_field], 0, order, query,
+                     self._seed + order)
+                    for order, query in enumerate(self._manifest.queries)
+                ]
+            else:
+                attempts = []
+                phases: Sequence[tuple[str, int]] = (
+                    [('warmup', run) for run in range(self._warmup_runs)]
+                    + [('measured', run) for run in range(self._measured_runs)]
+                )
+                for phase, run in phases:
+                    phase_seed = self._seed + phase_index
+                    ordered_queries = self._ordered_queries(phase_index)
+                    phase_index += 1
+                    attempts.extend(
+                        (phase, run, order, query, phase_seed)
+                        for order, query in enumerate(ordered_queries)
+                    )
+
+            total_attempts = len(attempts)
+            failure_count = 0
+            for ordinal, (phase, run, order, query, phase_seed) in enumerate(attempts, 1):
                     record = self._base_record(
                         query, phase, run, order, phase_seed
                     )
@@ -347,10 +450,20 @@ class _RdfQueryBenchmark:
                         if self._lifecycle == 'per_attempt':
                             adapter = self._adapter_factory()
                             adapter.open()
+                        self._progress_line(
+                            'start', ordinal, total_attempts, record, adapter,
+                            failure_count,
+                        )
                         record = self._execute_attempt(adapter, query, record)
                     finally:
                         if self._lifecycle == 'per_attempt' and adapter is not None:
                             adapter.close()
+                    if record['status'] not in {'ok', 'skipped', 'unsupported'}:
+                        failure_count += 1
+                    self._progress_line(
+                        'done', ordinal, total_attempts, record, adapter,
+                        failure_count, record.get('client_elapsed_ns', record.get('elapsed_ns')),
+                    )
                     records.append(record)
 
                     if phase == 'warmup':

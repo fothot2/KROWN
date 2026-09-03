@@ -88,8 +88,12 @@ class _RdfLibAdapter(_RdfQueryAdapter):
             raise RuntimeError('RDFLib adapter is not open')
         started_ns = time.perf_counter_ns()
         result = self._graph.query(query)
+        execute_ns = time.perf_counter_ns() - started_ns
+        materialize_started_ns = time.perf_counter_ns()
         rows = list(result)
-        elapsed_ns = time.perf_counter_ns() - started_ns
+        materialize_ns = time.perf_counter_ns() - materialize_started_ns
+        elapsed_ns = execute_ns + materialize_ns
+        correctness_started_ns = time.perf_counter_ns()
         metadata = {
             'measurement_boundary': 'rdflib-full-result-materialization',
         }
@@ -105,9 +109,15 @@ class _RdfLibAdapter(_RdfQueryAdapter):
                 )
                 if metadata['full_result_retained']:
                     metadata['normalized_result'] = normalized
+        correctness_ns = time.perf_counter_ns() - correctness_started_ns
         return _QueryOutcome(
             result_count=len(rows), result_fingerprint=fingerprint,
-            elapsed_ns=elapsed_ns, metadata=metadata,
+            elapsed_ns=elapsed_ns + correctness_ns, metadata=metadata,
+            stage_timings_ns={
+                'engine_execute': execute_ns,
+                'result_materialize': materialize_ns,
+                'correctness': correctness_ns,
+            },
         )
 
     def close(self) -> None:
@@ -128,12 +138,10 @@ def _make_rdflib_graph(engine: str, artifact_path: str,
             raise
         return graph
     if engine == 'vortex':
-        from vortex_rdflib import VortexStore
-        store = VortexStore(
-            artifact_path,
-            layout=vortex_layout,
-            backend='native',
-        )
+        from vortex_rdflib import VortexRdflibStore
+        # Vortex-RDF 0.10 files are self-describing. The store detects the
+        # physical layout and indexes from the artifact.
+        store = VortexRdflibStore(path=artifact_path)
     elif engine == 'cottas':
         from pycottas.cottas_store import COTTASStore
         store = COTTASStore(artifact_path)
@@ -270,6 +278,14 @@ class _WorkerRdfLibAdapter(_RdfQueryAdapter):
         self._connection = None
         self._process = None
         self._next_request_id = 0
+        self._worker_starts = 0
+
+    def progress_metadata(self):
+        process = self._process
+        return {
+            'worker_pid': process.pid if process is not None and process.is_alive() else 'none',
+            'worker_restarts': max(0, self._worker_starts - 1),
+        }
 
     def _discard(self) -> None:
         connection = self._connection
@@ -300,6 +316,7 @@ class _WorkerRdfLibAdapter(_RdfQueryAdapter):
             daemon=True,
         )
         process.start()
+        self._worker_starts += 1
         child.close()
         self._connection = parent
         self._process = process
