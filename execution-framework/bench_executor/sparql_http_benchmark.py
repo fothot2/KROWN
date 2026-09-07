@@ -97,7 +97,8 @@ class _SparqlHttpAdapter(_RdfQueryAdapter):
     def __init__(self, endpoint: str, timeout_s: float,
                  correctness_mode: str = 'fingerprint',
                  full_result_max_rows: int = 10000,
-                 system: str | None = None):
+                 system: str | None = None,
+                 request_max_rows: int | None = None):
         if not isinstance(endpoint, str) or not endpoint:
             raise ValueError('endpoint must be a non-empty string')
         if timeout_s <= 0:
@@ -108,11 +109,19 @@ class _SparqlHttpAdapter(_RdfQueryAdapter):
             )
         if full_result_max_rows < 0:
             raise ValueError('full_result_max_rows must be zero or greater')
+        if request_max_rows is not None:
+            if (not isinstance(request_max_rows, int)
+                    or isinstance(request_max_rows, bool)
+                    or request_max_rows <= 0):
+                raise ValueError('request_max_rows must be a positive integer or None')
+            if system != _QLEVER_SYSTEM:
+                raise ValueError('request_max_rows is supported only for qlever/default')
         self._endpoint = endpoint
         self._timeout_s = timeout_s
         self._correctness_mode = correctness_mode
         self._full_result_max_rows = full_result_max_rows
         self._system = system
+        self._request_max_rows = request_max_rows
         self._session = None
 
     def open(self) -> None:
@@ -129,10 +138,9 @@ class _SparqlHttpAdapter(_RdfQueryAdapter):
         else:
             accept = 'application/sparql-results+json'
         headers = {'Accept': accept}
-        data = {
-            'query': query,
-            'maxrows': '3000000',
-        }
+        data = {'query': query}
+        if self._request_max_rows is not None:
+            data['maxrows'] = str(self._request_max_rows)
         if self._system == _VIRTUOSO_SYSTEM:
             data['default-graph-uri'] = _VIRTUOSO_DEFAULT_GRAPH
         started_ns = time.perf_counter_ns()
@@ -178,6 +186,8 @@ class _SparqlHttpAdapter(_RdfQueryAdapter):
             'measurement_boundary': 'sparql-http-complete-response',
             'http_status': response.status_code,
             'response_bytes': len(body),
+            'request_max_rows': self._request_max_rows,
+            'result_cap_requested': self._request_max_rows is not None,
         }
         if self._correctness_mode != 'none':
             metadata.update(normalized)
@@ -246,6 +256,7 @@ class SparqlHttpBenchmark:
                 seed: int = 42, lifecycle: str = 'shared',
                 correctness_mode: str = 'fingerprint',
                 full_result_max_rows: int = 10000,
+                request_max_rows: int | None = None,
                 skip_after_warmup_timeout: bool = True,
                 skip_after_warmup_error: bool = True) -> bool:
         """Execute the workload and write canonical JSON Lines records."""
@@ -261,6 +272,7 @@ class SparqlHttpBenchmark:
                     correctness_mode=correctness_mode,
                     full_result_max_rows=full_result_max_rows,
                     system=system,
+                    request_max_rows=request_max_rows,
                 )
 
             benchmark = _RdfQueryBenchmark(

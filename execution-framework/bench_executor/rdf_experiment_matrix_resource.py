@@ -822,6 +822,9 @@ class RdfExperimentMatrixResource:
                         warmup_runs=int(policy["warmup_runs"]),
                         measured_runs=int(policy["measured_runs"]),
                         correctness_mode="fingerprint",
+                        request_max_rows=getattr(
+                            adapter, "query_request_max_rows", None
+                        ),
                     ))
                     query_lifecycle = benchmark.last_lifecycle_timing
                     if not isinstance(query_lifecycle, dict):

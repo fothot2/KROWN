@@ -36,8 +36,18 @@ class QLeverSystemAdapter(SparqlHttpSystemAdapter):
                  directory: str, image: str = 'kgconstruct/qlever:v0.6.0',
                  index_command: str | None = None,
                  server_command: str | None = None, verbose: bool = False,
-                 port: int = 7001):
+                 port: int = 7001, request_max_rows: int | None = None):
         super().__init__(_qlever_specification(), artifact)
+        if isinstance(request_max_rows, str):
+            if not request_max_rows.isdigit():
+                raise ValueError('request_max_rows must be a positive integer or None')
+            request_max_rows = int(request_max_rows)
+        if (request_max_rows is not None
+                and (not isinstance(request_max_rows, int)
+                     or isinstance(request_max_rows, bool)
+                     or request_max_rows <= 0)):
+            raise ValueError('request_max_rows must be a positive integer or None')
+        self.query_request_max_rows = request_max_rows
         if artifact.source_format != 'ntriples':
             raise ValueError('QLever rdf/source artifact must use ntriples')
         if len(artifact.files) != 1:
