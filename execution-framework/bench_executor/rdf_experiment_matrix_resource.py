@@ -475,6 +475,7 @@ _COMPACT_RESULT_FIELDS = (
     "result_count", "result_fingerprint", "client_elapsed_ns",
     "attempt_elapsed_ns", "timing_clock", "timing_schema",
     "timing_stages_ns", "timing_stages_sum_ns", "timing_reconciled",
+    "measurement_boundary", "request_max_rows", "result_cap_requested",
 )
 
 
