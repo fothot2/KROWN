@@ -9,6 +9,9 @@ import time
 import uuid
 from pathlib import Path
 
+from bench_executor.docker_cgroup_memory import (
+    container_memory_current_bytes,
+)
 from bench_executor.rdf_query_benchmark import (
     _QueryOutcome,
     _QueryTimeoutError,
@@ -31,6 +34,13 @@ class PersistentJsonlQueryAdapter(_RdfQueryAdapter):
         self._container_name = "KROWN-Comunica-" + uuid.uuid4().hex[:12]
         self._process = None
         self._request_id = 0
+
+    @property
+    def memory_scope(self) -> str:
+        return 'docker-container-cgroup-v2'
+
+    def current_rss_bytes(self) -> int | None:
+        return container_memory_current_bytes(self._container_name)
 
     def _stderr(self) -> str:
         process = self._process

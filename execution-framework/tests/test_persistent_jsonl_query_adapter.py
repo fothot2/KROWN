@@ -42,6 +42,18 @@ class PersistentJsonlTests(unittest.TestCase):
             timeout_s=timeout, normalizer=normalize_sparql_json_result,
         )
 
+    def test_memory_probe_uses_the_generated_container_name(self):
+        process = self.process([])
+        adapter = self.query_adapter(process)
+        with patch(
+            'bench_executor.persistent_jsonl_query_adapter.'
+            'container_memory_current_bytes',
+            return_value=123,
+        ) as memory:
+            self.assertEqual(adapter.current_rss_bytes(), 123)
+        self.assertEqual(adapter.memory_scope, 'docker-container-cgroup-v2')
+        memory.assert_called_once_with(adapter._container_name)
+
     def test_one_process_handles_two_queries(self):
         document = {"kind": "select", "variables": ["x"], "rows": []}
         process = self.process([
