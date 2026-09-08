@@ -46,6 +46,10 @@ class FusekiSystemAdapter(SparqlHttpSystemAdapter):
         self._fuseki: Fuseki | None = None
 
     @property
+    def memory_container(self) -> str:
+        return 'Fuseki'
+
+    @property
     def endpoint(self) -> str:
         if self._fuseki is None:
             raise RuntimeError('Fuseki is not prepared')

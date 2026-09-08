@@ -51,6 +51,10 @@ class VirtuosoSystemAdapter(SparqlHttpSystemAdapter):
         self._virtuoso: Virtuoso | None = None
 
     @property
+    def memory_container(self) -> str:
+        return 'Virtuoso'
+
+    @property
     def endpoint(self) -> str:
         if self._virtuoso is None:
             raise RuntimeError('Virtuoso is not prepared')

@@ -76,6 +76,10 @@ class QLeverSystemAdapter(SparqlHttpSystemAdapter):
         )
 
     @property
+    def memory_container(self) -> str:
+        return 'qlever_server'
+
+    @property
     def endpoint(self) -> str:
         return self._qlever.endpoint
 
