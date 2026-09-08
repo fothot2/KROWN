@@ -83,6 +83,14 @@ class QLeverSystemAdapter(SparqlHttpSystemAdapter):
     def endpoint(self) -> str:
         return self._qlever.endpoint
 
+    @property
+    def build_metrics(self):
+        return self._qlever.build_metrics
+
+    @property
+    def representation_size(self):
+        return self._qlever.representation_size
+
     def prepare(self) -> bool:
         shared = (self._data_path / 'shared').resolve()
         source = (shared / self._rdf_file.path).resolve()

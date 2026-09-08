@@ -113,12 +113,39 @@ class QLeverRuntimeCommandTests(unittest.TestCase):
         qlever._port = 7001
         qlever._server = None
         indexer = MagicMock()
-        indexer.run_and_wait_for_exit.return_value = True
+        indexer.run.return_value = True
+        indexer._container_id = "index-id"
+        indexer._docker.wait.return_value = 0
+        indexer._docker.logs.return_value = []
+        sampler = MagicMock()
+        sampler.stop.return_value = {
+            "scope": "docker-container-cgroup-v2",
+            "unit": "bytes",
+            "sampling_interval_ms": 10.0,
+            "sample_count": 1,
+            "sample_errors": 0,
+            "peak_rss_bytes": 1,
+            "schema": "rdf-phase-memory-metrics-v1",
+            "phases": {},
+        }
+        index_size = {
+            "schema": "rdf-representation-size-v1",
+            "boundary": "adapter-declared-paths",
+            "paths": ["/tmp/data/qlever-index"],
+            "logical_bytes": 3,
+            "allocated_bytes": 4096,
+            "file_count": 1,
+            "directory_count": 1,
+        }
         server = MagicMock()
         server.run.return_value = True
         with patch.object(QLever, "cleanup_containers", return_value=True), patch(
             "bench_executor.qlever.Container", side_effect=[indexer, server]
-        ) as container, patch("bench_executor.qlever.os.getuid", return_value=20001), patch(
+        ) as container, patch(
+            "bench_executor.qlever.PhaseAwareMemorySampler", return_value=sampler
+        ), patch.object(
+            QLever, "_index_size", return_value=index_size
+        ), patch("bench_executor.qlever.os.getuid", return_value=20001), patch(
             "bench_executor.qlever.os.getgid", return_value=6157
         ):
             self.assertTrue(qlever.build_index())

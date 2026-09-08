@@ -5,11 +5,14 @@ from __future__ import annotations
 import os
 from pathlib import Path
 import subprocess
+import time
 from time import monotonic, sleep
 
 import requests
 
 from bench_executor.container import Container
+from bench_executor.docker_cgroup_memory import container_memory_current_bytes
+from bench_executor.resource_memory_sampler import PhaseAwareMemorySampler
 from bench_executor.logger import Logger
 
 
@@ -17,6 +20,10 @@ READY_TIMEOUT_SECONDS = 120
 READY_POLL_SECONDS = 1
 READY_REQUEST_TIMEOUT_SECONDS = 5
 READY_QUERY = 'ASK { ?s ?p ?o }'
+_QLEVER_RUNTIME_FILE_SUFFIXES = (
+    '.metrics-log.jsonl',
+    '.resource-usage-log.tsv',
+)
 
 
 class QLever:
@@ -56,6 +63,8 @@ class QLever:
         self._server_command = server_command
         self._port = port
         self._server: Container | None = None
+        self.build_metrics = None
+        self.representation_size = None
 
     @property
     def endpoint(self) -> str:
@@ -71,10 +80,78 @@ class QLever:
             volumes=[f'{self._data_path}:/data'],
             working_directory='/data',
         )
+        started_ns = time.perf_counter_ns()
+        sampler = None
+        returncode = None
         try:
-            return indexer.run_and_wait_for_exit(self._index_command)
+            if not indexer.run(self._index_command):
+                return False
+            sampler = PhaseAwareMemorySampler(
+                lambda: container_memory_current_bytes('qlever_index'),
+                'docker-container-cgroup-v2',
+            )
+            sampler.start()
+            returncode = indexer._docker.wait(indexer._container_id)
+            logs = indexer._docker.logs(indexer._container_id)
+            for line in logs or []:
+                (self._logger.debug if returncode == 0 else self._logger.error)(line)
+            memory = sampler.stop()
+            sampler = None
+            elapsed_ns = time.perf_counter_ns() - started_ns
+            self.build_metrics = {
+                'schema': 'rdf-representation-build-metrics-v1',
+                'status': 'ok' if returncode == 0 else 'failed',
+                'clock': 'perf_counter_ns',
+                'elapsed_ns': elapsed_ns,
+                'returncode': returncode,
+                'memory': {key: memory[key] for key in (
+                    'scope', 'unit', 'sampling_interval_ms', 'sample_count',
+                    'sample_errors', 'peak_rss_bytes',
+                )},
+            }
+            if returncode != 0:
+                return False
+            self.representation_size = self._index_size()
+            return True
         finally:
+            if sampler is not None:
+                sampler.stop()
             self.cleanup_containers()
+
+    def _index_size(self) -> dict[str, object]:
+        root = (self._data_path / 'qlever-index').resolve()
+        if not root.is_dir():
+            raise FileNotFoundError(f'QLever index directory is missing: {root}')
+        logical = allocated = files = directories = excluded_files = 0
+        for path in [root, *root.rglob('*')]:
+            if path.is_symlink():
+                raise ValueError(f'QLever index contains a symlink: {path}')
+            info = path.stat(follow_symlinks=False)
+            if path.is_file():
+                if path.name.endswith(_QLEVER_RUNTIME_FILE_SUFFIXES):
+                    excluded_files += 1
+                    continue
+                files += 1
+                logical += info.st_size
+                allocated += info.st_blocks * 512
+            elif path.is_dir():
+                directories += 1
+            else:
+                raise ValueError(f'Unsupported QLever index entry: {path}')
+        return {
+            'schema': 'rdf-representation-size-v1',
+            'boundary': 'adapter-declared-paths',
+            'paths': [str(root)],
+            'exclusion_policy': {
+                'kind': 'filename-suffixes',
+                'suffixes': list(_QLEVER_RUNTIME_FILE_SUFFIXES),
+                'excluded_file_count': excluded_files,
+            },
+            'logical_bytes': logical,
+            'allocated_bytes': allocated,
+            'file_count': files,
+            'directory_count': directories,
+        }
 
     def start(self) -> bool:
         self._server = Container(

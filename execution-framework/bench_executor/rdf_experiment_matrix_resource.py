@@ -868,6 +868,8 @@ class RdfExperimentMatrixResource:
                 lifecycle_stages_ns: dict[str, int] | None = None
                 resource_metrics = None
                 phase_memory_metrics = None
+                build_metrics = None
+                representation_size = None
                 execution_mode = None
                 strategy = _execution_strategy(specification)
                 if strategy == "sparql-http":
@@ -915,6 +917,8 @@ class RdfExperimentMatrixResource:
                     query_stages = query_lifecycle["stages_ns"]
                     resource_metrics = query_lifecycle["resource_metrics"]
                     phase_memory_metrics = lifecycle.phase_memory_metrics
+                    build_metrics = lifecycle.build_metrics
+                    representation_size = lifecycle.representation_size
                     execution_mode = query_lifecycle["execution_mode"]
                     execute_wall_ns = lifecycle.operation_timings_ns.get("execute", 0)
                     query_classified_ns = sum(query_stages.values())
@@ -1065,6 +1069,8 @@ class RdfExperimentMatrixResource:
                 system_stages_ns["unclassified"] = unclassified_ns
                 summary["resource_metrics"] = resource_metrics
                 summary["phase_memory_metrics"] = phase_memory_metrics
+                summary["build_metrics"] = build_metrics
+                summary["representation_size"] = representation_size
                 summary["execution_mode"] = execution_mode or {
                     "storage": specification.configuration.kind,
                     "process_temperature": "warm-process",

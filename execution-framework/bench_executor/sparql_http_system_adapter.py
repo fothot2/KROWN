@@ -63,6 +63,8 @@ class SparqlHttpRunResult:
     operation_timings_ns: dict[str, int] = dataclasses.field(default_factory=dict)
     total_wall_ns: int = 0
     phase_memory_metrics: dict[str, Any] | None = None
+    build_metrics: dict[str, Any] | None = None
+    representation_size: dict[str, Any] | None = None
 
     @property
     def success(self) -> bool:
@@ -210,6 +212,8 @@ class SparqlHttpSystemAdapter(abc.ABC):
                         time.perf_counter_ns() - lifecycle_started_ns
                     ),
                     phase_memory_metrics=phase_memory_metrics,
+                    build_metrics=getattr(self, 'build_metrics', None),
+                    representation_size=getattr(self, 'representation_size', None),
                 )
             else:
                 operation_timings_ns[operation.value] = (
@@ -228,4 +232,6 @@ class SparqlHttpSystemAdapter(abc.ABC):
             operation_timings_ns=operation_timings_ns,
             total_wall_ns=time.perf_counter_ns() - lifecycle_started_ns,
             phase_memory_metrics=phase_memory_metrics,
+            build_metrics=getattr(self, 'build_metrics', None),
+            representation_size=getattr(self, 'representation_size', None),
         )
