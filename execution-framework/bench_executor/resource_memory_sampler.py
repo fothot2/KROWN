@@ -86,15 +86,16 @@ class PhaseAwareMemorySampler:
         while not self._stop.wait(self._interval_s):
             self._sample()
 
-    def stop(self) -> dict[str, Any]:
-        thread = self._thread
-        if thread is None:
+    def snapshot(self) -> dict[str, Any]:
+        """Return a consistent copy without stopping the sampler."""
+        if self._thread is None:
             raise RuntimeError('memory sampler is not started')
-        self._stop.set()
-        thread.join(timeout=max(1.0, self._interval_s * 10))
         self._sample()
         with self._lock:
-            phases = {name: value.to_dict() for name, value in self._phases.items()}
+            phases = {
+                name: value.to_dict()
+                for name, value in self._phases.items()
+            }
             errors = self._errors
         peaks = [value['peak_rss_bytes'] for value in phases.values()]
         peaks = [value for value in peaks if value is not None]
@@ -104,7 +105,17 @@ class PhaseAwareMemorySampler:
             'unit': 'bytes',
             'sampling_interval_ms': self._interval_s * 1000,
             'sample_errors': errors,
-            'sample_count': sum(value['sample_count'] for value in phases.values()),
+            'sample_count': sum(
+                value['sample_count'] for value in phases.values()
+            ),
             'peak_rss_bytes': max(peaks) if peaks else None,
             'phases': phases,
         }
+
+    def stop(self) -> dict[str, Any]:
+        thread = self._thread
+        if thread is None:
+            raise RuntimeError('memory sampler is not started')
+        self._stop.set()
+        thread.join(timeout=max(1.0, self._interval_s * 10))
+        return self.snapshot()

@@ -11,6 +11,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from bench_executor.experiment_matrix_contract import ArtifactFile, DatasetArtifact
+from bench_executor.oxigraph import Oxigraph
 from bench_executor.oxigraph_system_adapter import OxigraphSystemAdapter
 from bench_executor.sparql_http_system_adapter import sparql_http_system_specifications
 
@@ -69,6 +70,63 @@ class OxigraphSystemAdapterTests(unittest.TestCase):
                 OxigraphSystemAdapter(
                     self._artifact(source), directory, directory, "invalid"
                 )
+
+
+class OxigraphStoreResetTests(unittest.TestCase):
+    def runtime(self, directory: str, backend: str) -> Oxigraph:
+        runtime = Oxigraph.__new__(Oxigraph)
+        runtime._data_path = Path(directory).resolve()
+        runtime._backend = backend
+        runtime._logger = mock.MagicMock()
+        return runtime
+
+    def test_rocksdb_reset_removes_nested_stale_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = Path(directory) / 'oxigraph-rocksdb'
+            nested = store / 'nested'
+            nested.mkdir(parents=True)
+            (store / 'old.sst').write_bytes(b'old')
+            (nested / 'old.log').write_bytes(b'old')
+            runtime = self.runtime(directory, 'rocksdb')
+            self.assertTrue(runtime.reset_store())
+            self.assertTrue(store.is_dir())
+            self.assertEqual(list(store.iterdir()), [])
+
+    def test_memory_reset_does_not_modify_existing_store(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = Path(directory) / 'oxigraph-rocksdb'
+            store.mkdir()
+            stale = store / 'old.sst'
+            stale.write_bytes(b'old')
+            runtime = self.runtime(directory, 'memory')
+            self.assertTrue(runtime.reset_store())
+            self.assertEqual(stale.read_bytes(), b'old')
+
+    def test_reset_rejects_store_symlink(self):
+        with tempfile.TemporaryDirectory() as directory:
+            outside = Path(directory) / 'outside'
+            outside.mkdir()
+            marker = outside / 'keep'
+            marker.write_bytes(b'keep')
+            (Path(directory) / 'oxigraph-rocksdb').symlink_to(
+                outside, target_is_directory=True
+            )
+            runtime = self.runtime(directory, 'rocksdb')
+            self.assertFalse(runtime.reset_store())
+            self.assertEqual(marker.read_bytes(), b'keep')
+
+    def test_reset_rejects_nested_symlink(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = Path(directory) / 'oxigraph-rocksdb'
+            outside = Path(directory) / 'outside'
+            store.mkdir()
+            outside.mkdir()
+            marker = outside / 'keep'
+            marker.write_bytes(b'keep')
+            (store / 'escape').symlink_to(outside, target_is_directory=True)
+            runtime = self.runtime(directory, 'rocksdb')
+            self.assertFalse(runtime.reset_store())
+            self.assertEqual(marker.read_bytes(), b'keep')
 
 
 if __name__ == "__main__":

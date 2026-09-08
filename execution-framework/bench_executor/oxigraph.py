@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 from time import monotonic, sleep
 
@@ -55,6 +56,43 @@ class Oxigraph(Container):
             volumes=volumes,
         )
         self._command = command
+
+    def reset_store(self) -> bool:
+        """Create an empty RocksDB directory before one measured load."""
+        if self._backend != "rocksdb":
+            return True
+        data_root = self._data_path.resolve()
+        store = self._data_path / "oxigraph-rocksdb"
+        if store.is_symlink():
+            self._logger.error("Oxigraph RocksDB path is a symbolic link")
+            return False
+        resolved_store = store.resolve()
+        try:
+            resolved_store.relative_to(data_root)
+        except ValueError:
+            self._logger.error("Oxigraph RocksDB path leaves the data directory")
+            return False
+        if resolved_store.exists() and not resolved_store.is_dir():
+            self._logger.error("Oxigraph RocksDB path is not a directory")
+            return False
+        if resolved_store.is_dir():
+            for path in resolved_store.rglob("*"):
+                if path.is_symlink():
+                    self._logger.error(
+                        f"Oxigraph RocksDB store contains a symbolic link: {path}"
+                    )
+                    return False
+            try:
+                shutil.rmtree(resolved_store)
+            except OSError as error:
+                self._logger.error(f"Cannot reset Oxigraph RocksDB store: {error}")
+                return False
+        try:
+            resolved_store.mkdir(parents=True, exist_ok=False)
+        except OSError as error:
+            self._logger.error(f"Cannot create Oxigraph RocksDB store: {error}")
+            return False
+        return True
 
     @property
     def endpoint(self) -> str:
