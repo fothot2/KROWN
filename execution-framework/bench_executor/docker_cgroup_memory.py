@@ -55,7 +55,15 @@ def container_memory_current_bytes(
         return None
     relative = _unified_cgroup_path(pid, proc_root).relative_to('/')
     memory_file = cgroup_root / relative / 'memory.current'
-    value = memory_file.read_text(encoding='ascii').strip()
+    try:
+        value = memory_file.read_text(encoding='ascii').strip()
+    except FileNotFoundError:
+        # Docker can remove the cgroup after the first PID lookup while the
+        # shutdown sampler is still running. Ignore only confirmed container
+        # disappearance. Preserve the error when Docker still reports a PID.
+        if _container_pid(container) is None:
+            return None
+        raise
     if not value.isdigit():
         raise RuntimeError('memory.current is not a non-negative integer')
     return int(value)

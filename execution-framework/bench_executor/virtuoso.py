@@ -11,13 +11,14 @@ based on innovative support of existing open standards
 """
 
 import os
-import tempfile
-from pathlib import PurePosixPath
+import shutil
+from pathlib import Path, PurePosixPath
+from threading import Thread
+from typing import Dict
 
 import psutil
 import requests
-from typing import Dict
-from threading import Thread
+
 from bench_executor.container import Container
 from bench_executor.logger import Logger
 
@@ -99,10 +100,9 @@ class Virtuoso(Container):
         self._config_path = os.path.abspath(config_path)
         self._logger = Logger(__name__, directory, verbose)
 
-        tmp_dir = os.path.join(tempfile.gettempdir(), 'virtuoso')
+        database_dir = os.path.join(self._data_path, 'virtuoso')
         os.umask(0)
-        os.makedirs(tmp_dir, exist_ok=True)
-        os.makedirs(os.path.join(self._data_path, 'virtuoso'), exist_ok=True)
+        os.makedirs(database_dir, exist_ok=True)
         number_of_buffers = int(psutil.virtual_memory().total / (10**9)
                                 * NUMBER_OF_BUFFERS_PER_GB)
         max_dirty_buffers = int(psutil.virtual_memory().total / (10**9)
@@ -120,8 +120,44 @@ class Virtuoso(Container):
                          ports={'8890': '8890', '1111': '1111'},
                          environment=environment,
                          volumes=[f'{self._data_path}/shared:/usr/share/proj',
-                                  f'{tmp_dir}:/database'])
+                                  f'{database_dir}:/database'])
         self._endpoint = SPARQL_ENDPOINT
+
+    def reset_store(self) -> bool:
+        """Create an empty benchmark-local database before one measured load."""
+        data_root = Path(self._data_path).resolve()
+        store = data_root / 'virtuoso'
+        if store.is_symlink():
+            self._logger.error('Virtuoso database path is a symbolic link')
+            return False
+        resolved_store = store.resolve()
+        try:
+            resolved_store.relative_to(data_root)
+        except ValueError:
+            self._logger.error('Virtuoso database path leaves the data directory')
+            return False
+        if resolved_store.exists() and not resolved_store.is_dir():
+            self._logger.error('Virtuoso database path is not a directory')
+            return False
+        if resolved_store.is_dir():
+            for path in resolved_store.rglob('*'):
+                if path.is_symlink():
+                    self._logger.error(
+                        f'Virtuoso database contains a symbolic link: {path}'
+                    )
+                    return False
+            try:
+                shutil.rmtree(resolved_store)
+            except OSError as error:
+                self._logger.error(f'Cannot reset the Virtuoso database: {error}')
+                return False
+        try:
+            resolved_store.mkdir(parents=True, exist_ok=False)
+            resolved_store.chmod(0o777)
+        except OSError as error:
+            self._logger.error(f'Cannot create the Virtuoso database: {error}')
+            return False
+        return True
 
     def initialization(self) -> bool:
         """Initialize Virtuoso's database.
@@ -307,30 +343,13 @@ class Virtuoso(Container):
         return True
 
     def stop(self) -> bool:
-        """Stop Virtuoso.
-
-        Drops all triples in Virtuoso before stopping its container.
-
-        Returns
-        -------
-        success : bool
-            Whether stopping Virtuoso was successfull or not.
-        """
-        # Drop loaded triples
-        success, logs = self.exec('\'isql\' -U dba -P root '
-                                  'exec="delete from DB.DBA.load_list;"')
+        """Stop Virtuoso and preserve the measured database."""
+        command = "'isql' -U dba -P root " 'exec="checkpoint;"'
+        success, logs = self.exec(command)
         for line in logs:
             self._logger.debug(line)
         if not success:
-            self._logger.error('ISQL delete load list query failure')
-            return False
-
-        success, logs = self.exec('\'isql\' -U dba -P root '
-                                  'exec="rdf_global_reset();"')
-        for line in logs:
-            self._logger.debug(line)
-        if not success:
-            self._logger.error('ISQL RDF global reset query failure')
+            self._logger.error('ISQL final checkpoint query failure')
             return False
         return super().stop()
 

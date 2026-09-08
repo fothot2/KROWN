@@ -3,8 +3,13 @@
 from __future__ import annotations
 
 import hashlib
+import time
 from pathlib import Path
 
+from bench_executor.database_build_metrics import (
+    build_metrics_from_phase,
+    measure_persistent_paths,
+)
 from bench_executor.experiment_matrix_contract import DatasetArtifact
 from bench_executor.sparql_http_system_adapter import (
     SparqlHttpSystemAdapter,
@@ -49,6 +54,8 @@ class VirtuosoSystemAdapter(SparqlHttpSystemAdapter):
         self._loader_cores = loader_cores
         self._rdf_file = artifact.files[0]
         self._virtuoso: Virtuoso | None = None
+        self.build_metrics = None
+        self.representation_size = None
 
     @property
     def memory_container(self) -> str:
@@ -77,24 +84,63 @@ class VirtuosoSystemAdapter(SparqlHttpSystemAdapter):
             str(self._data_path), str(self._config_path),
             str(self._directory), self._verbose,
         )
-        return self._virtuoso.initialization()
+        return True
 
     def start(self) -> bool:
         if self._virtuoso is None:
+            return False
+        if not self._virtuoso.reset_store():
             return False
         return self._virtuoso.wait_until_ready()
 
     def ready(self) -> bool:
         if self._virtuoso is None:
             return False
-        return self._virtuoso.load_parallel(
+        if self.memory_sampler is None:
+            raise RuntimeError('Virtuoso build memory sampler is not active')
+        started_ns = time.perf_counter_ns()
+        succeeded = self._virtuoso.load_parallel(
             self._rdf_file.path, self._loader_cores,
         )
+        elapsed_ns = time.perf_counter_ns() - started_ns
+        memory = self.memory_sampler.snapshot()
+        self.build_metrics = build_metrics_from_phase(
+            elapsed_ns,
+            memory,
+            'artifact_open_or_load',
+            status='ok' if succeeded else 'failed',
+            returncode=0 if succeeded else None,
+        )
+        if not succeeded:
+            return False
+        self.representation_size = measure_persistent_paths(
+            [self._data_path / 'virtuoso'],
+            excluded_names=[
+                'virtuoso-temp.db',
+                'virtuoso.ini',
+                'virtuoso.log',
+                'virtuoso.pxa',
+                'virtuoso.trx',
+            ],
+        )
+        return True
 
     def stop(self) -> bool:
         if self._virtuoso is None:
             return True
-        return self._virtuoso.stop()
+        if not self._virtuoso.stop():
+            return False
+        self.representation_size = measure_persistent_paths(
+            [self._data_path / 'virtuoso'],
+            excluded_names=[
+                'virtuoso-temp.db',
+                'virtuoso.ini',
+                'virtuoso.log',
+                'virtuoso.pxa',
+                'virtuoso.trx',
+            ],
+        )
+        return True
 
     def collect(self) -> bool:
         """Leave log collection to the stock KROWN logger and executor."""
