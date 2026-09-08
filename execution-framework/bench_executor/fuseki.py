@@ -8,12 +8,15 @@ service, as a Java web application (WAR file), and as a standalone server.
 """
 
 import os
+import shutil
 import subprocess
+from pathlib import Path
 from time import monotonic, sleep
-
-import requests
-import psutil
 from typing import Dict
+
+import psutil
+import requests
+
 from bench_executor.container import Container
 from bench_executor.logger import Logger
 
@@ -92,6 +95,45 @@ class Fuseki(Container):
             return True
         except (OSError, subprocess.CalledProcessError):
             return False
+
+    def reset_store(self) -> bool:
+        """Create an empty TDB2 directory before one measured load."""
+        data_root = Path(self._data_path).resolve()
+        store = data_root / 'fuseki'
+        if store.is_symlink():
+            self._logger.error('Fuseki database path is a symbolic link')
+            return False
+        resolved_store = store.resolve()
+        try:
+            resolved_store.relative_to(data_root)
+        except ValueError:
+            self._logger.error('Fuseki database path leaves the data directory')
+            return False
+        if resolved_store.exists() and not resolved_store.is_dir():
+            self._logger.error('Fuseki database path is not a directory')
+            return False
+        if resolved_store.is_dir():
+            for path in resolved_store.rglob('*'):
+                if path.is_symlink():
+                    self._logger.error(
+                        f'Fuseki database contains a symbolic link: {path}'
+                    )
+                    return False
+            if not self.cleanup_data(self._data_path):
+                self._logger.error('Cannot make the Fuseki database writable')
+                return False
+            try:
+                shutil.rmtree(resolved_store)
+            except OSError as error:
+                self._logger.error(f'Cannot reset the Fuseki database: {error}')
+                return False
+        try:
+            resolved_store.mkdir(parents=True, exist_ok=False)
+            resolved_store.chmod(0o777)
+        except OSError as error:
+            self._logger.error(f'Cannot create the Fuseki database: {error}')
+            return False
+        return True
 
     def initialization(self) -> bool:
         """Initialize Fuseki's database.
@@ -214,27 +256,7 @@ class Fuseki(Container):
         return True
 
     def stop(self) -> bool:
-        """Stop Fuseki.
-
-        Drops all triples in Fuseki before stopping its container.
-
-        Returns
-        -------
-        success : bool
-            Whether stopping Fuseki was successfull or not.
-        """
-        # Drop triples on exit
-        try:
-            headers = {'Content-Type': 'application/sparql-update'}
-            data = 'DELETE { ?s ?p ?o . } WHERE { ?s ?p ?o . }'
-            r = requests.post('http://localhost:3030/ds/update',
-                              headers=headers, data=data)
-            self._logger.debug(f'Dropped triples: {r.text}')
-            r.raise_for_status()
-        except Exception as e:
-            self._logger.error(f'Failed to drop RDF: "{e}" from Fuseki')
-            return False
-
+        """Stop Fuseki and preserve the measured TDB2 representation."""
         if not super().stop():
             return False
         if not self.cleanup_data(self._data_path):

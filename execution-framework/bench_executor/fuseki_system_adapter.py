@@ -3,8 +3,13 @@
 from __future__ import annotations
 
 import hashlib
+import time
 from pathlib import Path
 
+from bench_executor.database_build_metrics import (
+    build_metrics_from_phase,
+    measure_persistent_paths,
+)
 from bench_executor.experiment_matrix_contract import DatasetArtifact
 from bench_executor.fuseki import Fuseki
 from bench_executor.sparql_http_system_adapter import (
@@ -44,6 +49,8 @@ class FusekiSystemAdapter(SparqlHttpSystemAdapter):
         self._verbose = verbose
         self._rdf_file = artifact.files[0]
         self._fuseki: Fuseki | None = None
+        self.build_metrics = None
+        self.representation_size = None
 
     @property
     def memory_container(self) -> str:
@@ -77,12 +84,33 @@ class FusekiSystemAdapter(SparqlHttpSystemAdapter):
     def start(self) -> bool:
         if self._fuseki is None:
             return False
+        if not self._fuseki.reset_store():
+            return False
         return self._fuseki.wait_until_ready()
 
     def ready(self) -> bool:
         if self._fuseki is None:
             return False
-        return self._fuseki.load(self._rdf_file.path)
+        if self.memory_sampler is None:
+            raise RuntimeError('Fuseki build memory sampler is not active')
+        started_ns = time.perf_counter_ns()
+        succeeded = self._fuseki.load(self._rdf_file.path)
+        elapsed_ns = time.perf_counter_ns() - started_ns
+        memory = self.memory_sampler.snapshot()
+        self.build_metrics = build_metrics_from_phase(
+            elapsed_ns,
+            memory,
+            'artifact_open_or_load',
+            status='ok' if succeeded else 'failed',
+            returncode=0 if succeeded else None,
+        )
+        if not succeeded:
+            return False
+        self.representation_size = measure_persistent_paths(
+            [self._data_path / 'fuseki'],
+            excluded_names=['tdb.lock', 'journal.jrnl'],
+        )
+        return True
 
     def stop(self) -> bool:
         if self._fuseki is None:
