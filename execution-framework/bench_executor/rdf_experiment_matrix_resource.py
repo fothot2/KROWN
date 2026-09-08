@@ -904,6 +904,7 @@ class RdfExperimentMatrixResource:
                             request_max_rows=getattr(
                                 adapter, "query_request_max_rows", None
                             ),
+                            memory_sampler=adapter.memory_sampler,
                         )
                     )
                     query_lifecycle = benchmark.last_lifecycle_timing
@@ -913,7 +914,7 @@ class RdfExperimentMatrixResource:
                         )
                     query_stages = query_lifecycle["stages_ns"]
                     resource_metrics = query_lifecycle["resource_metrics"]
-                    phase_memory_metrics = query_lifecycle.get("phase_memory_metrics")
+                    phase_memory_metrics = lifecycle.phase_memory_metrics
                     execution_mode = query_lifecycle["execution_mode"]
                     execute_wall_ns = lifecycle.operation_timings_ns.get("execute", 0)
                     query_classified_ns = sum(query_stages.values())

@@ -98,7 +98,8 @@ class _SparqlHttpAdapter(_RdfQueryAdapter):
                  correctness_mode: str = 'fingerprint',
                  full_result_max_rows: int = 10000,
                  system: str | None = None,
-                 request_max_rows: int | None = None):
+                 request_max_rows: int | None = None,
+                 memory_sampler=None, warmup_attempt_count: int = 0):
         if not isinstance(endpoint, str) or not endpoint:
             raise ValueError('endpoint must be a non-empty string')
         if timeout_s <= 0:
@@ -122,6 +123,9 @@ class _SparqlHttpAdapter(_RdfQueryAdapter):
         self._full_result_max_rows = full_result_max_rows
         self._system = system
         self._request_max_rows = request_max_rows
+        self._memory_sampler = memory_sampler
+        self._warmup_attempt_count = warmup_attempt_count
+        self._attempt_index = 0
         self._session = None
 
     def open(self) -> None:
@@ -132,6 +136,13 @@ class _SparqlHttpAdapter(_RdfQueryAdapter):
     def execute(self, query: str) -> _QueryOutcome:
         if self._session is None:
             raise RuntimeError('SPARQL HTTP adapter is not open')
+        if self._memory_sampler is not None:
+            phase = (
+                'warmup' if self._attempt_index < self._warmup_attempt_count
+                else 'measured'
+            )
+            self._memory_sampler.set_phase(phase)
+            self._attempt_index += 1
         result_type = classify_query(query).result_type
         if result_type in {'construct', 'describe'}:
             accept = 'application/n-triples, text/turtle;q=0.9'
@@ -258,7 +269,8 @@ class SparqlHttpBenchmark:
                 full_result_max_rows: int = 10000,
                 request_max_rows: int | None = None,
                 skip_after_warmup_timeout: bool = True,
-                skip_after_warmup_error: bool = True) -> bool:
+                skip_after_warmup_error: bool = True,
+                memory_sampler=None) -> bool:
         """Execute the workload and write canonical JSON Lines records."""
         try:
             manifest_path = self._shared_path(manifest_file, output=False)
@@ -273,6 +285,8 @@ class SparqlHttpBenchmark:
                     full_result_max_rows=full_result_max_rows,
                     system=system,
                     request_max_rows=request_max_rows,
+                    memory_sampler=memory_sampler,
+                    warmup_attempt_count=len(manifest.queries) * warmup_runs,
                 )
 
             benchmark = _RdfQueryBenchmark(

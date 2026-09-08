@@ -8,7 +8,9 @@ import time
 from collections.abc import Callable
 from typing import Any
 
+from bench_executor.docker_cgroup_memory import container_memory_current_bytes
 from bench_executor.experiment_matrix_contract import DatasetArtifact, SystemConfiguration
+from bench_executor.resource_memory_sampler import PhaseAwareMemorySampler
 from bench_executor.system_adapter_contract import (
     LifecycleCapabilities,
     LifecycleOperation,
@@ -60,6 +62,7 @@ class SparqlHttpRunResult:
     collect_attempted: bool = False
     operation_timings_ns: dict[str, int] = dataclasses.field(default_factory=dict)
     total_wall_ns: int = 0
+    phase_memory_metrics: dict[str, Any] | None = None
 
     @property
     def success(self) -> bool:
@@ -86,6 +89,12 @@ class SparqlHttpSystemAdapter(abc.ABC):
             raise ValueError('SPARQL HTTP dataset artifact must use rdf/source')
         self.specification = specification
         self.artifact = artifact
+        self.memory_sampler: PhaseAwareMemorySampler | None = None
+
+    @property
+    def memory_container(self) -> str | None:
+        """Return a stable query-server container name when supported."""
+        return None
 
     @property
     @abc.abstractmethod
@@ -123,6 +132,7 @@ class SparqlHttpSystemAdapter(abc.ABC):
         start_attempted = False
         stop_attempted = False
         collect_attempted = False
+        phase_memory_metrics = None
 
         operations: tuple[tuple[LifecycleOperation, Callable[[], bool]], ...] = (
             (LifecycleOperation.PREPARE, self.prepare),
@@ -142,6 +152,15 @@ class SparqlHttpSystemAdapter(abc.ABC):
                 collect_attempted = True
             operation_started_ns = time.perf_counter_ns()
             try:
+                if operation == LifecycleOperation.READY and self.memory_container:
+                    self.memory_sampler = PhaseAwareMemorySampler(
+                        lambda: container_memory_current_bytes(self.memory_container),
+                        'docker-container-cgroup-v2',
+                    )
+                    self.memory_sampler.start()
+                    self.memory_sampler.set_phase('artifact_open_or_load')
+                elif operation == LifecycleOperation.STOP and self.memory_sampler:
+                    self.memory_sampler.set_phase('engine_shutdown')
                 succeeded = action()
                 if not isinstance(succeeded, bool):
                     raise TypeError(f'{operation.value} must return bool')
@@ -175,6 +194,9 @@ class SparqlHttpSystemAdapter(abc.ABC):
                         + time.perf_counter_ns() - cleanup_started_ns
                     )
                 tracker.fail()
+                if self.memory_sampler is not None:
+                    phase_memory_metrics = self.memory_sampler.stop()
+                    self.memory_sampler = None
                 return SparqlHttpRunResult(
                     system_id=self.specification.system_id,
                     state=tracker.state,
@@ -187,12 +209,16 @@ class SparqlHttpSystemAdapter(abc.ABC):
                     total_wall_ns=(
                         time.perf_counter_ns() - lifecycle_started_ns
                     ),
+                    phase_memory_metrics=phase_memory_metrics,
                 )
             else:
                 operation_timings_ns[operation.value] = (
                     time.perf_counter_ns() - operation_started_ns
                 )
 
+        if self.memory_sampler is not None:
+            phase_memory_metrics = self.memory_sampler.stop()
+            self.memory_sampler = None
         return SparqlHttpRunResult(
             system_id=self.specification.system_id,
             state=tracker.state,
@@ -201,4 +227,5 @@ class SparqlHttpSystemAdapter(abc.ABC):
             collect_attempted=collect_attempted,
             operation_timings_ns=operation_timings_ns,
             total_wall_ns=time.perf_counter_ns() - lifecycle_started_ns,
+            phase_memory_metrics=phase_memory_metrics,
         )

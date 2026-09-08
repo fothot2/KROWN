@@ -44,8 +44,13 @@ class OxigraphSystemAdapter(SparqlHttpSystemAdapter):
 
         super().__init__(_system_specification(f"oxigraph/{backend}"), artifact)
         self._data_path = Path(data_path).resolve()
+        self._backend = backend
         self._artifact_file = artifact.files[0]
         self._oxigraph = Oxigraph(data_path, directory, verbose, backend, port)
+
+    @property
+    def memory_container(self) -> str:
+        return f"Oxigraph-{self._backend}"
 
     @property
     def endpoint(self) -> str:
