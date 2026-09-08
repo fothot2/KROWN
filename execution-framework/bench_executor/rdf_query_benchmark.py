@@ -11,8 +11,12 @@ import traceback
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
-from bench_executor.benchmark_result import SCHEMA_VERSION, sha256_text, \
-        write_query_records_atomic
+from bench_executor.benchmark_result import (
+    SCHEMA_VERSION,
+    sha256_text,
+    write_query_records_atomic,
+)
+from bench_executor.resource_memory_sampler import PhaseAwareMemorySampler
 
 MANIFEST_SCHEMA_VERSION = 1
 LIFECYCLE_MODES = frozenset({'shared', 'per_attempt'})
@@ -131,6 +135,15 @@ class _RdfQueryAdapter:
 
     def close(self) -> None:
         """Close the query system or its prepared artifact."""
+
+    def current_rss_bytes(self) -> int | None:
+        """Return current RSS for the measured engine scope, if supported."""
+        return None
+
+    @property
+    def memory_scope(self) -> str | None:
+        """Return the stable name of the measured memory boundary."""
+        return None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -439,10 +452,24 @@ class _RdfQueryBenchmark:
         resource_before = _resource_snapshot()
         open_ns = 0
         close_ns = 0
+        memory_sampler = None
+        phase_memory_metrics = None
 
         try:
             if self._lifecycle == 'shared':
                 shared_adapter = self._adapter_factory()
+                memory_scope = getattr(
+                    shared_adapter, 'memory_scope', None
+                )
+                memory_probe = getattr(
+                    shared_adapter, 'current_rss_bytes', None
+                )
+                if memory_scope is not None and callable(memory_probe):
+                    memory_sampler = PhaseAwareMemorySampler(
+                        memory_probe, memory_scope,
+                    )
+                    memory_sampler.start()
+                    memory_sampler.set_phase('artifact_open_or_load')
                 open_started_ns = time.perf_counter_ns()
                 shared_adapter.open()
                 open_ns += time.perf_counter_ns() - open_started_ns
@@ -475,6 +502,8 @@ class _RdfQueryBenchmark:
                     record = self._base_record(
                         query, phase, run, order, phase_seed
                     )
+                    if memory_sampler is not None:
+                        memory_sampler.set_phase(phase)
                     if phase == 'measured' and query.query_id in skip_reasons:
                         reason_type, reason_message = skip_reasons[query.query_id]
                         record.update({
@@ -533,9 +562,13 @@ class _RdfQueryBenchmark:
                             )
         finally:
             if shared_adapter is not None:
+                if memory_sampler is not None:
+                    memory_sampler.set_phase('engine_shutdown')
                 close_started_ns = time.perf_counter_ns()
                 shared_adapter.close()
                 close_ns += time.perf_counter_ns() - close_started_ns
+            if memory_sampler is not None:
+                phase_memory_metrics = memory_sampler.stop()
 
         warmup_ns = sum(
             int(record.get('attempt_elapsed_ns') or 0)
@@ -566,6 +599,7 @@ class _RdfQueryBenchmark:
                 'schema': 'rdf-resource-metrics-v1',
                 **resource_metrics,
             },
+            'phase_memory_metrics': phase_memory_metrics,
             'execution_mode': {
                 'process_temperature': (
                     'warm-process' if self._lifecycle == 'shared'

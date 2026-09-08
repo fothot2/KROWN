@@ -41,6 +41,51 @@ def _phase(workload: Mapping[str, Any], name: str) -> Mapping[str, Any]:
     return value if isinstance(value, Mapping) else {}
 
 
+def _phase_memory(value: Any, field: str) -> Mapping[str, Any] | None:
+    if value is None:
+        return None
+    if not isinstance(value, Mapping) or value.get("schema") != "rdf-phase-memory-metrics-v1":
+        raise ValueError(f"{field} has an invalid phase memory schema")
+    if value.get("unit") != "bytes":
+        raise ValueError(f"{field} must use bytes")
+    scope = value.get("scope")
+    if not isinstance(scope, str) or not scope:
+        raise ValueError(f"{field}.scope must be a non-empty string")
+    for name in ("sample_count", "sample_errors"):
+        _number(value.get(name), f"{field}.{name}")
+    peak = value.get("peak_rss_bytes")
+    if peak is not None:
+        _number(peak, f"{field}.peak_rss_bytes")
+    interval = value.get("sampling_interval_ms")
+    if not isinstance(interval, (int, float)) or isinstance(interval, bool) or interval <= 0:
+        raise ValueError(f"{field}.sampling_interval_ms must be positive")
+    phases = value.get("phases")
+    if not isinstance(phases, Mapping):
+        raise ValueError(f"{field}.phases must be an object")
+    for phase, metrics in phases.items():
+        if not isinstance(phase, str) or not isinstance(metrics, Mapping):
+            raise ValueError(f"{field}.phases is invalid")
+        _number(metrics.get("sample_count"), f"{field}.phases.{phase}.sample_count")
+        for name in ("first_rss_bytes", "last_rss_bytes", "peak_rss_bytes"):
+            item = metrics.get(name)
+            if item is not None:
+                _number(item, f"{field}.phases.{phase}.{name}")
+    return value
+
+
+def _mebibytes(value: int | None) -> float | None:
+    return None if value is None else round(value / (1024 * 1024), 3)
+
+
+def _memory_phase_peak(memory: Mapping[str, Any] | None, phase: str) -> float | None:
+    if memory is None:
+        return None
+    value = memory["phases"].get(phase)
+    if not isinstance(value, Mapping):
+        return None
+    return _mebibytes(value.get("peak_rss_bytes"))
+
+
 def build_report(summary: Mapping[str, Any]) -> dict[str, Any]:
     experiments = summary.get("experiments")
     if not isinstance(experiments, list):
@@ -59,6 +104,10 @@ def build_report(summary: Mapping[str, Any]) -> dict[str, Any]:
         measured_count = _number(measured.get("attempt_count", 0), "measured.attempt_count")
         measured_total = _number(measured.get("attempt_total_ns", 0), "measured.attempt_total_ns")
         metrics = experiment.get("resource_metrics") or {}
+        memory = _phase_memory(
+            experiment.get("phase_memory_metrics"),
+            f"experiment {index}.phase_memory_metrics",
+        )
         mode = experiment.get("execution_mode") or {}
         stages = timing["stages_ns"]
         rows.append({
@@ -86,6 +135,23 @@ def build_report(summary: Mapping[str, Any]) -> dict[str, Any]:
             "max_rss_mib": (
                 None if metrics.get("max_rss_kib") is None
                 else round(_number(metrics["max_rss_kib"], "max_rss_kib") / 1024, 3)
+            ),
+            "memory_scope": None if memory is None else memory["scope"],
+            "memory_sampling_interval_ms": (
+                None if memory is None else memory["sampling_interval_ms"]
+            ),
+            "memory_sample_count": None if memory is None else memory["sample_count"],
+            "memory_sample_errors": None if memory is None else memory["sample_errors"],
+            "peak_rss_mib": (
+                None if memory is None else _mebibytes(memory["peak_rss_bytes"])
+            ),
+            "open_or_load_peak_rss_mib": _memory_phase_peak(
+                memory, "artifact_open_or_load"
+            ),
+            "warmup_peak_rss_mib": _memory_phase_peak(memory, "warmup"),
+            "measured_peak_rss_mib": _memory_phase_peak(memory, "measured"),
+            "shutdown_peak_rss_mib": _memory_phase_peak(
+                memory, "engine_shutdown"
             ),
             "user_cpu_ms": _milliseconds(metrics.get("user_cpu_ns")),
             "system_cpu_ms": _milliseconds(metrics.get("system_cpu_ns")),

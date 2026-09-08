@@ -249,6 +249,22 @@ def _rdflib_worker(connection, engine: str, artifact_path: str,
         connection.close()
 
 
+def _process_tree_rss_bytes(pid: int) -> int:
+    """Return the concurrent RSS sum for one live process tree."""
+    try:
+        parent = psutil.Process(pid)
+        processes = [parent, *parent.children(recursive=True)]
+    except psutil.NoSuchProcess:
+        return 0
+    total = 0
+    for process in processes:
+        try:
+            total += process.memory_info().rss
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+    return total
+
+
 def _terminate_process_tree(pid: int, grace_s: float) -> None:
     """Terminate one process tree and kill processes that do not stop."""
     try:
@@ -307,6 +323,16 @@ class _WorkerRdfLibAdapter(_RdfQueryAdapter):
     @property
     def startup_resource_metrics(self):
         return self._startup_resource_metrics
+
+    @property
+    def memory_scope(self) -> str:
+        return 'rdflib-worker-process-tree'
+
+    def current_rss_bytes(self) -> int | None:
+        process = self._process
+        if process is None or not process.is_alive():
+            return None
+        return _process_tree_rss_bytes(process.pid)
 
     def progress_metadata(self):
         process = self._process

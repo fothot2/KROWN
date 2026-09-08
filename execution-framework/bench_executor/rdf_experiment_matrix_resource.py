@@ -867,6 +867,7 @@ class RdfExperimentMatrixResource:
                 adapter = None
                 lifecycle_stages_ns: dict[str, int] | None = None
                 resource_metrics = None
+                phase_memory_metrics = None
                 execution_mode = None
                 strategy = _execution_strategy(specification)
                 if strategy == "sparql-http":
@@ -912,6 +913,7 @@ class RdfExperimentMatrixResource:
                         )
                     query_stages = query_lifecycle["stages_ns"]
                     resource_metrics = query_lifecycle["resource_metrics"]
+                    phase_memory_metrics = query_lifecycle.get("phase_memory_metrics")
                     execution_mode = query_lifecycle["execution_mode"]
                     execute_wall_ns = lifecycle.operation_timings_ns.get("execute", 0)
                     query_classified_ns = sum(query_stages.values())
@@ -983,6 +985,7 @@ class RdfExperimentMatrixResource:
                         )
                     query_stages = query_lifecycle["stages_ns"]
                     resource_metrics = query_lifecycle["resource_metrics"]
+                    phase_memory_metrics = query_lifecycle.get("phase_memory_metrics")
                     execution_mode = query_lifecycle["execution_mode"]
                     lifecycle_stages_ns = {
                         "preflight": 0,
@@ -1006,6 +1009,7 @@ class RdfExperimentMatrixResource:
                     )
                     query_stages = query_lifecycle["stages_ns"]
                     resource_metrics = query_lifecycle["resource_metrics"]
+                    phase_memory_metrics = query_lifecycle.get("phase_memory_metrics")
                     execution_mode = dict(query_lifecycle["execution_mode"])
                     execution_mode.update(
                         {
@@ -1059,6 +1063,7 @@ class RdfExperimentMatrixResource:
                     )
                 system_stages_ns["unclassified"] = unclassified_ns
                 summary["resource_metrics"] = resource_metrics
+                summary["phase_memory_metrics"] = phase_memory_metrics
                 summary["execution_mode"] = execution_mode or {
                     "storage": specification.configuration.kind,
                     "process_temperature": "warm-process",
