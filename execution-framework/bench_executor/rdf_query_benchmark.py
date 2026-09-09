@@ -445,6 +445,7 @@ class _RdfQueryBenchmark:
                 'timing_stages_ns': {'dispatch': attempt_ns},
                 'timing_stages_sum_ns': attempt_ns,
                 'timing_reconciled': True,
+                'measurement_boundary': 'rdf-adapter-attempt-until-failure',
                 'error_type': type(error).__name__,
                 'error_message': str(error),
             })

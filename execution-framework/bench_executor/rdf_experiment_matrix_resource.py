@@ -1028,8 +1028,8 @@ class RdfExperimentMatrixResource:
                     )
                     lifecycle_stages_ns = {
                         "preflight": 0,
-                        "artifact_open_or_load": 0,
-                        "engine_startup": query_stages["artifact_open_or_load"],
+                        "artifact_open_or_load": query_stages["artifact_open_or_load"],
+                        "engine_startup": 0,
                         "warmup": query_stages["warmup"],
                         "measured": query_stages["measured"],
                         "engine_shutdown": query_stages["engine_shutdown"],
