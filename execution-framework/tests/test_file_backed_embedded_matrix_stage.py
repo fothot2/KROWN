@@ -10,6 +10,7 @@ FRAMEWORK = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(FRAMEWORK))
 
 from bench_executor.comunica_hdt_system_adapter import adapter_specification as comunica_specification
+from bench_executor.hdt_rdflib_optimized_system_adapter import adapter_specification as hdt_specification
 from bench_executor.cottas_standalone_system_adapter import adapter_specification as cottas_specification
 from bench_executor.rdflib_system_adapter import adapter_specification as rdflib_specification
 from bench_executor.rdf_experiment_matrix_resource import _execution_strategy
@@ -20,6 +21,7 @@ class FileBackedEmbeddedMatrixStageTests(unittest.TestCase):
     def test_registered_runtime_routes_are_explicit(self):
         specifications = (
             comunica_specification(),
+            hdt_specification(),
             cottas_specification(),
             rdflib_specification(),
             VortexRdfRuntimeConfiguration().adapter_specification(),
@@ -28,6 +30,7 @@ class FileBackedEmbeddedMatrixStageTests(unittest.TestCase):
             {item.system_id: _execution_strategy(item) for item in specifications},
             {
                 "comunica/hdt": "persistent-jsonl",
+                "hdt-rdflib/optimized-in-memory": "persistent-jsonl",
                 "pycottas/default": "rdflib-worker",
                 "rdflib/default": "rdflib-worker",
                 "vortex-rdf/simple-dictionary-native-rdf-store": "rdflib-worker",

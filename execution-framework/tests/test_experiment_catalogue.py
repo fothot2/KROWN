@@ -10,7 +10,7 @@ class CatalogueTests(unittest.TestCase):
  def catalogue(self):return load_catalogue(Path(__file__).resolve().parents[1]/"experiment-catalogue.json")
  def test_supervisor_scope_is_frozen(self):
   value=self.catalogue();self.assertEqual(value["scope"]["blocking_benchmarks"],["bsbm","krown-synthetic","dbbench"]);self.assertEqual(value["required_outputs"], ["json","csv","markdown","xlsx"]);self.assertEqual(value["oom_rule"],"confirmed-process-memory-exhaustion-only")
-  systems={item["system_id"] for item in value["setups"]};self.assertIn("fuseki/memory",systems);self.assertIn("fuseki/tdb2",systems);self.assertIn("hdt-rdflib/default",systems);self.assertIn("pyoxigraph-rdflib/memory",systems);self.assertIn("vortex-rdf/dictionary-secondary-by-reference-memory",systems)
+  systems={item["system_id"] for item in value["setups"]};self.assertIn("fuseki/memory",systems);self.assertIn("fuseki/tdb2",systems);self.assertIn("hdt-rdflib/optimized-in-memory",systems);self.assertIn("pyoxigraph-rdflib/memory",systems);self.assertIn("vortex-rdf/dictionary-secondary-by-reference-memory",systems)
  def test_missing_systems_and_cells_block_readiness(self):
   value=self.catalogue()
   with patch("bench_executor.experiment_catalogue.system_adapter_specifications",lambda:[Spec("pycottas/default")]):audit=build_coverage_audit(value)

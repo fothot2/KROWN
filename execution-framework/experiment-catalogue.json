@@ -13,7 +13,8 @@
       "sparqloscope-qlever"
     ],
     "deferred_systems": [
-      "rete/default"
+      "rete/default",
+      "pyoxigraph-rdflib/memory"
     ],
     "dataset_scales": {
       "bsbm": [
@@ -113,17 +114,17 @@
       "notes": "Must prove whether memory and file modes are identical."
     },
     {
-      "id": "hdt-rdflib-memory",
-      "system_id": "hdt-rdflib/default",
+      "id": "hdt-rdflib-optimized-memory",
+      "system_id": "hdt-rdflib/optimized-in-memory",
       "required": true,
-      "engine": "rdflib",
+      "engine": "rdflib-hdt",
       "representation": "hdt/default",
       "storage_mode": "in-memory",
-      "execution_interface": "rdflib-plugin",
+      "execution_interface": "persistent-jsonl",
       "formats": [
         "nt"
       ],
-      "notes": "HDT does not support N-Quads in this setup."
+      "notes": "RDFLib interface with rdflib-hdt optimized BGP evaluation in an isolated in-memory worker."
     },
     {
       "id": "comunica-hdt-file",
@@ -169,7 +170,7 @@
     {
       "id": "pyoxigraph-rdflib-memory",
       "system_id": "pyoxigraph-rdflib/memory",
-      "required": true,
+      "required": false,
       "engine": "rdflib",
       "representation": "rdf/source",
       "storage_mode": "in-memory",
@@ -178,21 +179,21 @@
         "nt",
         "nq"
       ],
-      "notes": "Wrapper comparison with Vortex plus RDFLib."
+      "notes": "Deferred by the experiment owner."
     },
     {
-      "id": "rdflib-native-file",
+      "id": "rdflib-native-memory",
       "system_id": "rdflib/default",
       "required": true,
       "engine": "rdflib",
       "representation": "rdf/source",
-      "storage_mode": "file-backed",
+      "storage_mode": "in-memory",
       "execution_interface": "native-rdflib",
       "formats": [
         "nt",
         "nq"
       ],
-      "notes": "Plain RDFLib baseline. No hidden plugin or index."
+      "notes": "Plain RDFLib Memory store. The RDF source file is parsed before query measurement."
     },
     {
       "id": "fuseki-memory",

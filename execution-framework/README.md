@@ -668,3 +668,8 @@ python execution-framework/compare_rdf_results.py \
   --policy /path/to/optional-policy.json \
   --output /path/to/comparison.json
 ```
+
+
+### Optimized HDT plus RDFLib
+
+`hdt-rdflib/optimized-in-memory` uses the pinned isolated `rdflib-hdt` 3.3 runtime. The worker opens the query-ready `dataset.hdt` and `dataset.hdt.index.v1-1` pair with `mapped=False`, `indexed=True`, and `safe_mode=True`. It calls `optimize_sparql()` once inside the worker process. KROWN preserves both basenames during staging and verifies their hashes before and after execution.

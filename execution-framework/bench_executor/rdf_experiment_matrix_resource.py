@@ -181,23 +181,26 @@ def _runtime_preflight(
             "adapter_options contains unknown systems: " + ", ".join(unknown)
         )
 
-    docker = shutil.which("docker")
-    if docker is None:
-        raise RuntimeError("docker executable is not available")
-    daemon = subprocess.run(
-        [docker, "info", "--format", "{{json .ServerVersion}}"],
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    if daemon.returncode != 0:
-        raise RuntimeError("Docker daemon is not available")
-    stale_containers = _running_krown_containers()
-    if stale_containers:
-        raise RuntimeError(
-            "matrix-owned Docker containers are already running: "
-            + ", ".join(stale_containers)
+    selected_ids = {item.system_configuration for item in experiments}
+    local_only = selected_ids == {"hdt-rdflib/optimized-in-memory"}
+    daemon_version = None
+    if not local_only:
+        docker = shutil.which("docker")
+        if docker is None:
+            raise RuntimeError("docker executable is not available")
+        daemon = subprocess.run(
+            [docker, "info", "--format", "{{json .ServerVersion}}"],
+            text=True, capture_output=True, check=False,
         )
+        if daemon.returncode != 0:
+            raise RuntimeError("Docker daemon is not available")
+        daemon_version = json.loads(daemon.stdout)
+        stale_containers = _running_krown_containers()
+        if stale_containers:
+            raise RuntimeError(
+                "matrix-owned Docker containers are already running: "
+                + ", ".join(stale_containers)
+            )
 
     images: set[str] = set()
     ports: set[int] = set()
@@ -240,9 +243,17 @@ def _runtime_preflight(
                 raise ValueError(
                     f"persistent JSONL strategy requires file-backed kind: {system_id}"
                 )
-            for method in ("worker_command", "force_stop_command"):
+            required_methods = ["worker_command"]
+            if system_id != "hdt-rdflib/optimized-in-memory":
+                required_methods.append("force_stop_command")
+            for method in required_methods:
                 if not callable(getattr(adapter_class, method, None)):
                     raise TypeError(f"{system_id} adapter misses {method}")
+            if system_id == "hdt-rdflib/optimized-in-memory":
+                module.validate_runtime()
+                if [item.path for item in artifact.files] != [
+                    "dataset.hdt", "dataset.hdt.index.v1-1"]:
+                    raise ValueError("optimized HDT requires the query-ready file pair")
         elif strategy == "rdflib-worker":
             engine = specification.parameters.get("engine")
             if engine not in _ENGINE_MODULES:
@@ -298,7 +309,7 @@ def _runtime_preflight(
         "schema": PREFLIGHT_SCHEMA,
         "declaration_sha256": _sha256(declaration_path),
         "manifest_sha256": _sha256(manifest_path),
-        "docker_server_version": json.loads(daemon.stdout),
+        "docker_server_version": daemon_version,
         "required_images": sorted(images),
         "required_python_modules": sorted(modules),
         "required_ports": sorted(ports),
@@ -362,11 +373,19 @@ def _stage_artifacts(
                 or _sha256(source) != declared.sha256
             ):
                 raise ValueError(f"representation file differs from receipt: {source}")
-            suffix = source.suffix
-            relative = Path("rdf-matrix-artifacts") / (
-                representation.replace("/", "--") + f"--{index}{suffix}"
-            )
+            if representation == "hdt/default":
+                expected = ["dataset.hdt", "dataset.hdt.index.v1-1"]
+                if [item.path for item in artifact.files] != expected:
+                    raise ValueError("hdt/default requires the exact query-ready file pair")
+                relative = (Path("rdf-matrix-artifacts") /
+                            representation.replace("/", "--") / source.name)
+            else:
+                suffix = source.suffix
+                relative = Path("rdf-matrix-artifacts") / (
+                    representation.replace("/", "--") + f"--{index}{suffix}"
+                )
             target = (shared / relative).resolve()
+            target.parent.mkdir(parents=True, exist_ok=True)
             try:
                 target.relative_to(shared.resolve())
             except ValueError as error:
@@ -392,6 +411,18 @@ def _stage_artifacts(
             producer=dict(artifact.producer),
         )
     return staged
+
+
+def _verify_staged_artifact(artifact: DatasetArtifact, shared: Path) -> None:
+    for declared in artifact.files:
+        target = (shared / declared.path).resolve()
+        try:
+            target.relative_to(shared.resolve())
+        except ValueError as error:
+            raise ValueError("staged artifact escapes data/shared") from error
+        if (not target.is_file() or target.stat().st_size != declared.size_bytes
+                or _sha256(target) != declared.sha256):
+            raise ValueError(f"staged representation changed: {declared.path}")
 
 
 def _constructor_arguments(
@@ -1156,6 +1187,7 @@ class RdfExperimentMatrixResource:
                     }
                 elif strategy == "persistent-jsonl":
                     adapter = adapter_class(**dict(options.get(system_id, {})))
+                    _verify_staged_artifact(artifact, self._shared)
                     query_lifecycle = _run_file_backed(
                         adapter,
                         self._shared / artifact.files[0].path,
@@ -1172,12 +1204,14 @@ class RdfExperimentMatrixResource:
                     phase_memory_metrics = query_lifecycle.get("phase_memory_metrics")
                     execution_mode = dict(query_lifecycle["execution_mode"])
                     load_temperature_metrics = query_lifecycle.get("load_temperature_metrics")
+                    provenance = getattr(adapter, "execution_mode_provenance", None)
                     execution_mode.update(
-                        {
-                            "storage": "file-backed",
-                            "engine": "comunica-hdt",
-                        }
+                        dict(provenance) if isinstance(provenance, dict) else
+                        {"storage": "file-backed", "engine": "comunica-hdt"}
                     )
+                    _verify_staged_artifact(artifact, self._shared)
+                    build_metrics = artifact.producer.get("build_metrics")
+                    representation_size = artifact.producer.get("representation_size")
                     lifecycle_stages_ns = {
                         "preflight": 0,
                         "artifact_open_or_load": query_stages["artifact_open_or_load"],

@@ -8,6 +8,7 @@ from bench_executor.dataset_artifact_receipt import load_dataset_artifact_receip
 from bench_executor.experiment_matrix_contract import DatasetArtifact,ExperimentSpecification,SystemConfiguration
 from bench_executor.sparql_http_system_adapter import sparql_http_system_specifications
 from bench_executor.comunica_hdt_system_adapter import adapter_specification as comunica_specification
+from bench_executor.hdt_rdflib_optimized_system_adapter import adapter_specification as hdt_rdflib_specification
 from bench_executor.cottas_standalone_system_adapter import adapter_specification as cottas_specification
 from bench_executor.vortex_rdf_system_adapter import VortexRdfRuntimeConfiguration
 from bench_executor.rdflib_system_adapter import adapter_specification as rdflib_specification
@@ -30,7 +31,7 @@ def _vortex_rdf_specifications()->tuple[SystemAdapterSpecification,...]:
   result.append(SystemAdapterSpecification(configuration=system_configuration,adapter=base.adapter,capabilities=base.capabilities,parameters=parameters))
  return tuple(result)
 def system_adapter_specifications()->tuple[SystemAdapterSpecification,...]:
- specifications=(*sparql_http_system_specifications(),comunica_specification(),cottas_specification(),*_vortex_rdf_specifications(),rdflib_specification())
+ specifications=(*sparql_http_system_specifications(),comunica_specification(),hdt_rdflib_specification(),cottas_specification(),*_vortex_rdf_specifications(),rdflib_specification())
  if len({item.system_id for item in specifications})!=len(specifications): raise ValueError("system adapter IDs must be unique")
  return specifications
 def _contained(root:Path,value:Any,field:str)->Path:
@@ -59,7 +60,9 @@ def load_rdf_experiment_declaration(path:str|Path)->tuple[tuple[ExperimentSpecif
   if system_id in seen: raise ValueError(f"duplicate system binding: {system_id}")
   if system_id not in registry: raise ValueError(f"unknown system binding: {system_id}")
   if representation not in artifacts: raise ValueError(f"unknown representation binding: {representation}")
-  artifact=artifacts[representation]; experiment=ExperimentSpecification(experiment_id=f'{value["experiment"]}/{system_id}',benchmark=value["benchmark"],dataset=value["dataset"],workload=value["workload"],dataset_artifact=artifact.artifact_id,system_configuration=system_id,execution_policy=value["execution_policy"])
+  artifact=artifacts[representation]
+  if system_id=="hdt-rdflib/optimized-in-memory" and [item.path for item in artifact.files] != ["dataset.hdt","dataset.hdt.index.v1-1"]: raise ValueError("optimized HDT requires dataset.hdt and dataset.hdt.index.v1-1")
+  experiment=ExperimentSpecification(experiment_id=f'{value["experiment"]}/{system_id}',benchmark=value["benchmark"],dataset=value["dataset"],workload=value["workload"],dataset_artifact=artifact.artifact_id,system_configuration=system_id,execution_policy=value["execution_policy"])
   experiment.validate_bindings(artifact,registry[system_id].configuration); experiments.append(experiment); seen.add(system_id)
  return tuple(experiments),artifacts
 def resolve_adapter_classes()->dict[str,type]:
