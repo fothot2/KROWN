@@ -573,7 +573,14 @@ def _compact_result_record(record: Mapping[str, Any]) -> dict[str, Any]:
     if missing:
         raise ValueError("result record misses compact fields: " + ", ".join(missing))
     compact = {name: record[name] for name in _COMPACT_RESULT_FIELDS if name in record}
-    for name in ("stream_position", "bsbm_template_id"):
+    for name in (
+        "stream_position",
+        "bsbm_template_id",
+        "skip_kind",
+        "skip_reason",
+        "skip_policy_id",
+        "skip_policy_sha256",
+    ):
         if name in record:
             compact[name] = record[name]
     if record["status"] != "ok":
