@@ -61,6 +61,7 @@ def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
         "--failure-output", type=_relative_shared_path, required=True
     )
     parser.add_argument("--force-include", action="store_true")
+    parser.add_argument("--quarantine-snapshot", type=_relative_shared_path)
     parser.add_argument("--quiet", action="store_true")
     arguments = parser.parse_args(argv)
     try:
@@ -81,6 +82,7 @@ def execute_matrix(
     failure_output: str,
     verbose: bool = True,
     force_include: bool = False,
+    quarantine_snapshot: str | None = None,
 ) -> bool:
     scenario = scenario.expanduser().resolve()
     declaration = declaration.expanduser().resolve()
@@ -99,6 +101,7 @@ def execute_matrix(
         failure_results_file=failure_results,
         failure_output_file=failure_output,
         force_include=force_include,
+        quarantine_snapshot_file=quarantine_snapshot,
     )
 
 
@@ -115,6 +118,7 @@ def main(argv: list[str] | None = None) -> int:
         failure_output=arguments.failure_output,
         verbose=not arguments.quiet,
         force_include=arguments.force_include,
+        quarantine_snapshot=arguments.quarantine_snapshot,
     )
     return 0 if success else 1
 

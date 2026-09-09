@@ -498,6 +498,7 @@ class RdfLibQueryBenchmark:
                 correctness_mode: str = 'fingerprint',
                 full_result_max_rows: int = 10000,
                 manual_skip_rules=(),
+                automatic_quarantine_rules=(),
                 force_include: bool = False) -> bool:
         """Execute an RDFLib-backed workload and save JSON Lines records."""
         try:
@@ -561,6 +562,7 @@ class RdfLibQueryBenchmark:
                 skip_after_warmup_timeout=skip_after_warmup_timeout,
                 skip_after_warmup_error=skip_after_warmup_error,
                 manual_skip_rules=manual_skip_rules,
+                automatic_quarantine_rules=automatic_quarantine_rules,
                 force_include=force_include,
             )
             records = benchmark.run(output_path)

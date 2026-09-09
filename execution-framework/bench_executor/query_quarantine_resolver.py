@@ -123,3 +123,42 @@ def resolve_snapshot(
         "decisions": decisions,
     }
     return {**body, "snapshot_sha256": content_sha256(body)}
+
+
+def validate_snapshot(value: Mapping[str, Any]) -> dict[str, Any]:
+    """Validate one immutable resolver snapshot for matrix execution."""
+    if not isinstance(value, Mapping):
+        raise TypeError("quarantine snapshot must be an object")
+    required = {
+        "schema", "created_at_utc", "policy_id", "policy_sha256",
+        "evidence_ledger_sha256", "decisions", "snapshot_sha256",
+    }
+    if set(value) != required or value.get("schema") != SNAPSHOT_SCHEMA:
+        raise ValueError("invalid quarantine snapshot fields or schema")
+    body = dict(value)
+    snapshot_sha256 = body.pop("snapshot_sha256")
+    if snapshot_sha256 != content_sha256(body):
+        raise ValueError("snapshot_sha256 mismatch")
+    if not isinstance(value["decisions"], list):
+        raise TypeError("snapshot decisions must be an array")
+    seen = set()
+    decisions = []
+    for raw in value["decisions"]:
+        if not isinstance(raw, Mapping):
+            raise TypeError("snapshot decision must be an object")
+        decision = dict(raw)
+        decision_sha256 = decision.pop("decision_sha256", None)
+        if decision_sha256 != content_sha256(decision):
+            raise ValueError("decision_sha256 mismatch")
+        if decision.get("decision") not in {"quarantined", "not_quarantined"}:
+            raise ValueError("unsupported quarantine decision")
+        key = (
+            decision.get("system"), decision.get("selector_kind"),
+            decision.get("selector_value"), decision.get("compatibility_sha256"),
+        )
+        if key in seen:
+            raise ValueError("duplicate quarantine snapshot decision")
+        seen.add(key)
+        decision["decision_sha256"] = decision_sha256
+        decisions.append(decision)
+    return {**body, "decisions": decisions, "snapshot_sha256": snapshot_sha256}

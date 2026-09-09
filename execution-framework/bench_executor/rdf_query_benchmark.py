@@ -282,6 +282,7 @@ class _RdfQueryBenchmark:
             progress: bool = True,
             progress_stream=None,
             manual_skip_rules=(),
+            automatic_quarantine_rules=(),
             force_include: bool = False):
         if not callable(adapter_factory):
             raise TypeError('adapter_factory must be callable')
@@ -327,6 +328,7 @@ class _RdfQueryBenchmark:
             raise TypeError('force_include must be a boolean')
         self._force_include = force_include
         self._manual_skip_rules = tuple(manual_skip_rules)
+        self._automatic_quarantine_rules = tuple(automatic_quarantine_rules)
         self.last_lifecycle_timing: dict[str, Any] | None = None
 
     def _manual_skip_rule(self, query):
@@ -335,6 +337,17 @@ class _RdfQueryBenchmark:
         value = query.metadata.get('bsbm_template_id')
         for rule in self._manual_skip_rules:
             if value is not None and str(value) in rule['selector_values']:
+                return rule
+        return None
+
+    def _automatic_quarantine_rule(self, query):
+        if self._force_include:
+            return None
+        for rule in self._automatic_quarantine_rules:
+            value = query.metadata.get(rule["selector_kind"])
+            if value is not None and str(value) == rule["selector_value"]:
+                if query.query_sha256 != rule["query_sha256"]:
+                    raise ValueError("quarantine query_sha256 differs from manifest")
                 return rule
         return None
 
@@ -570,6 +583,28 @@ class _RdfQueryBenchmark:
                             'skip_reason': manual_skip_rule['reason'],
                             'skip_policy_id': manual_skip_rule['policy_id'],
                             'skip_policy_sha256': manual_skip_rule['policy_sha256'],
+                        })
+                        records.append(record)
+                        continue
+                    automatic_rule = self._automatic_quarantine_rule(query)
+                    if automatic_rule is not None:
+                        record.update({
+                            'status': 'skipped', 'elapsed_ns': 0,
+                            'client_elapsed_ns': 0, 'attempt_elapsed_ns': 0,
+                            'timing_clock': 'perf_counter_ns',
+                            'timing_schema': 'rdf-attempt-timing-v1',
+                            'timing_stages_ns': {'dispatch': 0},
+                            'timing_stages_sum_ns': 0, 'timing_reconciled': True,
+                            'measurement_boundary': 'query-skipped-before-adapter-dispatch',
+                            'skip_kind': 'automatic-query-flavour-quarantine',
+                            'skip_reason': automatic_rule['reason'],
+                            'skip_policy_id': automatic_rule['policy_id'],
+                            'skip_policy_sha256': automatic_rule['policy_sha256'],
+                            'skip_evidence_ledger_sha256': automatic_rule['evidence_ledger_sha256'],
+                            'skip_quarantine_snapshot_sha256': automatic_rule['snapshot_sha256'],
+                            'skip_decision_sha256': automatic_rule['decision_sha256'],
+                            'skip_evidence_count': automatic_rule['evidence_count'],
+                            'skip_timeout_count': automatic_rule['timeout_count'],
                         })
                         records.append(record)
                         continue
