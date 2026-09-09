@@ -496,7 +496,9 @@ class RdfLibQueryBenchmark:
                 startup_timeout_s: float = 120.0,
                 kill_grace_s: float = 1.0,
                 correctness_mode: str = 'fingerprint',
-                full_result_max_rows: int = 10000) -> bool:
+                full_result_max_rows: int = 10000,
+                manual_skip_rules=(),
+                force_include: bool = False) -> bool:
         """Execute an RDFLib-backed workload and save JSON Lines records."""
         try:
             if engine not in SUPPORTED_ENGINES:
@@ -558,6 +560,8 @@ class RdfLibQueryBenchmark:
                 lifecycle=lifecycle,
                 skip_after_warmup_timeout=skip_after_warmup_timeout,
                 skip_after_warmup_error=skip_after_warmup_error,
+                manual_skip_rules=manual_skip_rules,
+                force_include=force_include,
             )
             records = benchmark.run(output_path)
             self.last_lifecycle_timing = benchmark.last_lifecycle_timing

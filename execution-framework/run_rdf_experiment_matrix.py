@@ -60,6 +60,7 @@ def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--failure-output", type=_relative_shared_path, required=True
     )
+    parser.add_argument("--force-include", action="store_true")
     parser.add_argument("--quiet", action="store_true")
     arguments = parser.parse_args(argv)
     try:
@@ -79,6 +80,7 @@ def execute_matrix(
     failure_results: str,
     failure_output: str,
     verbose: bool = True,
+    force_include: bool = False,
 ) -> bool:
     scenario = scenario.expanduser().resolve()
     declaration = declaration.expanduser().resolve()
@@ -96,6 +98,7 @@ def execute_matrix(
         selected_systems=list(systems),
         failure_results_file=failure_results,
         failure_output_file=failure_output,
+        force_include=force_include,
     )
 
 
@@ -111,6 +114,7 @@ def main(argv: list[str] | None = None) -> int:
         failure_results=arguments.failure_results,
         failure_output=arguments.failure_output,
         verbose=not arguments.quiet,
+        force_include=arguments.force_include,
     )
     return 0 if success else 1
 

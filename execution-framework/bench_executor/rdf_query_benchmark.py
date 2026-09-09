@@ -280,7 +280,9 @@ class _RdfQueryBenchmark:
             skip_after_warmup_timeout: bool = True,
             skip_after_warmup_error: bool = True,
             progress: bool = True,
-            progress_stream=None):
+            progress_stream=None,
+            manual_skip_rules=(),
+            force_include: bool = False):
         if not callable(adapter_factory):
             raise TypeError('adapter_factory must be callable')
         for name, value in (
@@ -321,7 +323,20 @@ class _RdfQueryBenchmark:
             raise TypeError('progress must be a boolean')
         self._progress = progress
         self._progress_stream = sys.stderr if progress_stream is None else progress_stream
+        if not isinstance(force_include, bool):
+            raise TypeError('force_include must be a boolean')
+        self._force_include = force_include
+        self._manual_skip_rules = tuple(manual_skip_rules)
         self.last_lifecycle_timing: dict[str, Any] | None = None
+
+    def _manual_skip_rule(self, query):
+        if self._force_include:
+            return None
+        value = query.metadata.get('bsbm_template_id')
+        for rule in self._manual_skip_rules:
+            if value is not None and str(value) in rule['selector_values']:
+                return rule
+        return None
 
     @staticmethod
     def _adapter_progress(adapter):
@@ -538,6 +553,26 @@ class _RdfQueryBenchmark:
                     record = self._base_record(
                         query, phase, run, order, phase_seed
                     )
+                    manual_skip_rule = self._manual_skip_rule(query)
+                    if manual_skip_rule is not None:
+                        record.update({
+                            'status': 'skipped',
+                            'elapsed_ns': 0,
+                            'client_elapsed_ns': 0,
+                            'attempt_elapsed_ns': 0,
+                            'timing_clock': 'perf_counter_ns',
+                            'timing_schema': 'rdf-attempt-timing-v1',
+                            'timing_stages_ns': {'dispatch': 0},
+                            'timing_stages_sum_ns': 0,
+                            'timing_reconciled': True,
+                            'measurement_boundary': 'query-skipped-before-adapter-dispatch',
+                            'skip_kind': 'manual-query-flavour-policy',
+                            'skip_reason': manual_skip_rule['reason'],
+                            'skip_policy_id': manual_skip_rule['policy_id'],
+                            'skip_policy_sha256': manual_skip_rule['policy_sha256'],
+                        })
+                        records.append(record)
+                        continue
                     if memory_sampler is not None:
                         memory_sampler.set_phase(phase)
                     if phase == 'measured' and query.query_id in skip_reasons:

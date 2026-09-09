@@ -468,6 +468,40 @@ def _execution_strategy(specification) -> str:
     return strategy
 
 
+def _manual_skip_rules(policy, manifest, system_id):
+    entries = policy.get("manual_query_flavour_skips", [])
+    if not isinstance(entries, list):
+        raise ValueError("manual_query_flavour_skips must be an array")
+    available = {
+        str(query.metadata.get("bsbm_template_id")) for query in manifest.queries
+    }
+    result = []
+    seen = set()
+    for entry in entries:
+        if set(entry) != {"system", "bsbm_template_ids", "policy_id", "reason"}:
+            raise ValueError("invalid manual query-flavour skip declaration")
+        values = entry["bsbm_template_ids"]
+        if not isinstance(values, list) or not values or len(values) != len(set(values)):
+            raise ValueError("bsbm_template_ids must be a non-empty unique array")
+        unknown = sorted(set(values) - available)
+        if unknown:
+            raise ValueError("unknown bsbm_template_ids: " + ", ".join(unknown))
+        for value in values:
+            key = (entry["system"], value)
+            if key in seen:
+                raise ValueError("duplicate manual query-flavour skip selector")
+            seen.add(key)
+        canonical = json.dumps(entry, sort_keys=True, separators=(",", ":"))
+        if entry["system"] == system_id:
+            result.append({
+                "selector_values": list(values),
+                "policy_id": entry["policy_id"],
+                "reason": entry["reason"],
+                "policy_sha256": hashlib.sha256(canonical.encode()).hexdigest(),
+            })
+    return tuple(result)
+
+
 def _run_file_backed(
     adapter,
     artifact_path: Path,
@@ -475,6 +509,7 @@ def _run_file_backed(
     output_path: Path,
     experiment,
     system_id: str,
+    force_include: bool = False,
 ) -> bool:
     manifest = _load_query_manifest(str(manifest_path))
     policy = experiment.execution_policy
@@ -490,6 +525,8 @@ def _run_file_backed(
         manifest=manifest,
         warmup_runs=int(policy["warmup_runs"]),
         measured_runs=int(policy["measured_runs"]),
+        manual_skip_rules=_manual_skip_rules(policy, manifest, system_id),
+        force_include=force_include,
     )
     benchmark.run(str(output_path))
     if not isinstance(benchmark.last_lifecycle_timing, dict):
@@ -695,11 +732,17 @@ def _result_summary(path: Path, experiment, representation: str) -> dict[str, An
     failures = sum(
         row.get("status") not in {"ok", "skipped", "unsupported"} for row in records
     )
+    successes = sum(row.get("status") == "ok" for row in records)
+    skipped = sum(row.get("status") == "skipped" for row in records)
+    unsupported = sum(row.get("status") == "unsupported" for row in records)
     return {
         "system": experiment.system_configuration,
         "representation": representation,
         "record_count": len(records),
+        "success_count": successes,
         "failure_count": failures,
+        "unsupported_count": unsupported,
+        "skipped_count": skipped,
         "workload_timing": _attempt_timing_summary(records),
         "result_file": path.name,
     }
@@ -787,6 +830,7 @@ class RdfExperimentMatrixResource:
         selected_systems_env: str | None = None,
         failure_results_file: str | None = None,
         failure_output_file: str | None = None,
+        force_include: bool = False,
     ) -> bool:
         """Execute selected declaration bindings and publish summary plus archive."""
         self.last_outcome = "success"
@@ -976,6 +1020,10 @@ class RdfExperimentMatrixResource:
                         "timeout_s": float(policy["timeout_s"]),
                         "timeout_mode": "worker",
                         "correctness_mode": "fingerprint",
+                        "manual_skip_rules": _manual_skip_rules(
+                            policy, _load_query_manifest(str(manifest_path)), system_id
+                        ),
+                        "force_include": force_include,
                     }
                     if "vortex_layout" in specification.parameters:
                         query_parameters["vortex_layout"] = specification.parameters[
@@ -1014,6 +1062,7 @@ class RdfExperimentMatrixResource:
                         output_path,
                         experiment,
                         system_id,
+                        force_include=force_include,
                     )
                     query_stages = query_lifecycle["stages_ns"]
                     resource_metrics = query_lifecycle["resource_metrics"]
@@ -1041,9 +1090,6 @@ class RdfExperimentMatrixResource:
                 measured_ns = time.perf_counter_ns() - measured_started_ns
                 validation_started_ns = time.perf_counter_ns()
                 summary = _result_summary(output_path, experiment, representation)
-                summary["success_count"] = (
-                    summary["record_count"] - summary["failure_count"]
-                )
                 summary["status"] = (
                     "ok" if summary["failure_count"] == 0 else "completed_with_failures"
                 )
