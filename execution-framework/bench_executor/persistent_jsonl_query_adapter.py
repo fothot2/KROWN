@@ -97,12 +97,16 @@ class PersistentJsonlQueryAdapter(_RdfQueryAdapter):
     def _force_stop(self):
         process = self._process
         self._process = None
-        subprocess.run(
-            self._adapter.force_stop_command(self._worker_name),
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=False,
-        )
+        direct_stop = getattr(self._adapter, "force_stop_process", None)
+        if callable(direct_stop):
+            direct_stop(process, self._worker_name)
+        else:
+            subprocess.run(
+                self._adapter.force_stop_command(self._worker_name),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
         if process is not None:
             try:
                 process.wait(timeout=5)

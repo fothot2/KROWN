@@ -27,11 +27,6 @@ class HdtRdflibOptimizedSystemAdapter:
         if path.name != "dataset.hdt" or not path.is_file() or not index.is_file():
             raise FileNotFoundError("query-ready dataset.hdt pair is required")
         return path
-    def worker_command(self, *, host_artifact, container_name=None):
-        artifact = self.prepare(host_artifact)
-        if not RUNTIME_PYTHON.is_file() or not WORKER.is_file():
-            raise FileNotFoundError("optimized HDT runtime or worker is missing")
-        return [str(RUNTIME_PYTHON), str(WORKER), str(artifact)]
     def ready_response_contract(self):
         artifact = self._prepared
         return {"kind":"ready","protocol":"jsonl-v1","source_open":True,
@@ -49,5 +44,6 @@ class HdtRdflibOptimizedSystemAdapter:
             return sum(item.memory_info().rss for item in [parent, *parent.children(recursive=True)])
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             return None
-    def force_stop_command(self, worker_name):
-        return ["true"]
+    def force_stop_process(self, process, worker_name):
+        if process is not None and process.poll() is None:
+            process.terminate()

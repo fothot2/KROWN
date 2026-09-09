@@ -24,6 +24,30 @@ class Tests(unittest.TestCase):
             hdt=Path(directory)/"dataset.hdt"; hdt.write_bytes(b"hdt")
             with self.assertRaises(FileNotFoundError):
                 HdtRdflibOptimizedSystemAdapter().worker_command(host_artifact=hdt)
+    def test_local_force_stop_terminates_the_live_worker(self):
+        backend = HdtRdflibOptimizedSystemAdapter()
+        process = MagicMock()
+        process.poll.return_value = None
+        backend.force_stop_process(process, "KROWN-HDT-RDFLib")
+        process.terminate.assert_called_once_with()
+
+    def test_transport_uses_direct_stop_without_shell_command(self):
+        backend = MagicMock()
+        backend.worker_identity.return_value = "worker"
+        backend.force_stop_process = MagicMock()
+        adapter = PersistentJsonlQueryAdapter(
+            adapter=backend,
+            artifact=Path("x"),
+            timeout_s=1,
+            normalizer=lambda document, query: document,
+        )
+        process = MagicMock()
+        adapter._process = process
+        adapter._force_stop()
+        backend.force_stop_process.assert_called_once_with(process, "worker")
+        backend.force_stop_command.assert_not_called()
+        process.wait.assert_called_once_with(timeout=5)
+
     def test_transport_uses_backend_memory_hooks(self):
         backend=MagicMock(); backend.memory_scope="external-worker-process-tree"
         backend.worker_identity.return_value="worker"; backend.current_rss_bytes.return_value=7
