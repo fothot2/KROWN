@@ -7,8 +7,10 @@ from datetime import datetime, timezone
 from typing import Any
 
 from bench_executor.query_quarantine_contract import content_sha256, validate_ledger
+from bench_executor.query_quarantine_ledger_build import LEDGER_V2_SCHEMA, validate_ledger_v2
 
 SNAPSHOT_SCHEMA = "rdf-query-quarantine-snapshot-v1"
+SNAPSHOT_V2_SCHEMA = "rdf-query-quarantine-snapshot-v2"
 POLICY_SCHEMA = "rdf-query-quarantine-policy-v1"
 POLICY_FIELDS = {
     "schema",
@@ -89,13 +91,25 @@ def _decision(group: list[dict[str, Any]], policy: dict[str, Any]) -> dict[str, 
     return result
 
 
+def validate_ledger_dispatch(value: Mapping[str, Any]) -> dict[str, Any]:
+    """Validate one supported evidence ledger by explicit schema."""
+    if not isinstance(value, Mapping):
+        raise TypeError("ledger must be an object")
+    schema = value.get("schema")
+    if schema == "rdf-query-quarantine-evidence-ledger-v1":
+        return validate_ledger(value)
+    if schema == LEDGER_V2_SCHEMA:
+        return validate_ledger_v2(value)
+    raise ValueError(f"unsupported evidence ledger schema: {schema}")
+
+
 def resolve_snapshot(
     ledger: Mapping[str, Any],
     policy: Mapping[str, Any],
     created_at_utc: str | None = None,
 ) -> dict[str, Any]:
     """Validate inputs and resolve all auditable compatibility decisions."""
-    validated_ledger = validate_ledger(ledger)
+    validated_ledger = validate_ledger_dispatch(ledger)
     validated_policy = validate_policy(policy)
     groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for entry in validated_ledger["entries"]:
@@ -114,14 +128,28 @@ def resolve_snapshot(
     created = created_at_utc or datetime.now(timezone.utc).isoformat()
     if not isinstance(created, str) or not created or created != created.strip():
         raise ValueError("created_at_utc must be non-empty text")
-    body = {
-        "schema": SNAPSHOT_SCHEMA,
-        "created_at_utc": created,
-        "policy_id": validated_policy["policy_id"],
-        "policy_sha256": content_sha256(validated_policy),
-        "evidence_ledger_sha256": validated_ledger["ledger_sha256"],
-        "decisions": decisions,
-    }
+    if validated_ledger["schema"] == LEDGER_V2_SCHEMA:
+        body = {
+            "schema": SNAPSHOT_V2_SCHEMA,
+            "created_at_utc": created,
+            "policy_id": validated_policy["policy_id"],
+            "policy_sha256": content_sha256(validated_policy),
+            "evidence_ledger_schema": validated_ledger["schema"],
+            "evidence_ledger_sha256": validated_ledger["ledger_sha256"],
+            "source_ingestion_document_sha256s": list(
+                validated_ledger["source_ingestion_document_sha256s"]
+            ),
+            "decisions": decisions,
+        }
+    else:
+        body = {
+            "schema": SNAPSHOT_SCHEMA,
+            "created_at_utc": created,
+            "policy_id": validated_policy["policy_id"],
+            "policy_sha256": content_sha256(validated_policy),
+            "evidence_ledger_sha256": validated_ledger["ledger_sha256"],
+            "decisions": decisions,
+        }
     return {**body, "snapshot_sha256": content_sha256(body)}
 
 
@@ -129,11 +157,27 @@ def validate_snapshot(value: Mapping[str, Any]) -> dict[str, Any]:
     """Validate one immutable resolver snapshot for matrix execution."""
     if not isinstance(value, Mapping):
         raise TypeError("quarantine snapshot must be an object")
-    required = {
-        "schema", "created_at_utc", "policy_id", "policy_sha256",
-        "evidence_ledger_sha256", "decisions", "snapshot_sha256",
-    }
-    if set(value) != required or value.get("schema") != SNAPSHOT_SCHEMA:
+    schema = value.get("schema")
+    if schema == SNAPSHOT_SCHEMA:
+        required = {
+            "schema", "created_at_utc", "policy_id", "policy_sha256",
+            "evidence_ledger_sha256", "decisions", "snapshot_sha256",
+        }
+    elif schema == SNAPSHOT_V2_SCHEMA:
+        required = {
+            "schema", "created_at_utc", "policy_id", "policy_sha256",
+            "evidence_ledger_schema", "evidence_ledger_sha256",
+            "source_ingestion_document_sha256s", "decisions",
+            "snapshot_sha256",
+        }
+        if value.get("evidence_ledger_schema") != LEDGER_V2_SCHEMA:
+            raise ValueError("v2 snapshot must reference a v2 evidence ledger")
+        hashes = value.get("source_ingestion_document_sha256s")
+        if not isinstance(hashes, list) or not hashes or hashes != sorted(set(hashes)):
+            raise ValueError("invalid source ingestion document hashes")
+    else:
+        raise ValueError("invalid quarantine snapshot fields or schema")
+    if set(value) != required:
         raise ValueError("invalid quarantine snapshot fields or schema")
     body = dict(value)
     snapshot_sha256 = body.pop("snapshot_sha256")
