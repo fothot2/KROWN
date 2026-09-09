@@ -18,6 +18,12 @@ class ComunicaHdtSystemAdapter:
     def container_artifact(self):return CONTAINER_ARTIFACT
     @property
     def lifecycle(self):return ("prepare","execute","collect")
+    @property
+    def memory_scope(self):return "docker-container-cgroup-v2"
+    def ready_response_contract(self):
+        return {"kind":"ready","protocol":"jsonl-v1","source_open":True,
+                "source_type":"hdt","source_boundary":"comunica-query-source-identify",
+                "source_reference":self.container_artifact}
     def prepare(self,artifact):
         path=Path(artifact).expanduser().resolve()
         if not path.is_file():raise FileNotFoundError(f"HDT artifact is missing: {path}")

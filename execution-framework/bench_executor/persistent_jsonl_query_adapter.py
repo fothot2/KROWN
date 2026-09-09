@@ -2,6 +2,7 @@
 """Keep one external JSON Lines query worker alive for one workload."""
 from __future__ import annotations
 
+import inspect
 import json
 import select
 import subprocess
@@ -31,20 +32,28 @@ class PersistentJsonlQueryAdapter(_RdfQueryAdapter):
         self._timeout_s = timeout_s
         self._startup_timeout_s = startup_timeout_s
         self._normalizer = normalizer
-        self._container_name = "KROWN-Comunica-" + uuid.uuid4().hex[:12]
+        identity = getattr(adapter, "worker_identity", None)
+        self._worker_name = (identity() if callable(identity) else
+                             "KROWN-Comunica-" + uuid.uuid4().hex[:12])
+        # Preserve the validated private alias for existing callers and tests.
+        self._container_name = self._worker_name
         self._process = None
         self._request_id = 0
 
     @property
     def memory_scope(self) -> str:
-        return 'docker-container-cgroup-v2'
+        value = getattr(self._adapter, 'memory_scope', None)
+        return value if isinstance(value, str) else 'docker-container-cgroup-v2'
 
     @property
     def supports_load_temperature(self) -> bool:
         return True
 
     def current_rss_bytes(self) -> int | None:
-        return container_memory_current_bytes(self._container_name)
+        probe = getattr(self._adapter, "current_rss_bytes", None)
+        if callable(probe):
+            return probe(self._process, self._worker_name)
+        return container_memory_current_bytes(self._worker_name)
 
     def _stderr(self) -> str:
         process = self._process
@@ -89,7 +98,7 @@ class PersistentJsonlQueryAdapter(_RdfQueryAdapter):
         process = self._process
         self._process = None
         subprocess.run(
-            self._adapter.force_stop_command(self._container_name),
+            self._adapter.force_stop_command(self._worker_name),
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             check=False,
@@ -106,7 +115,7 @@ class PersistentJsonlQueryAdapter(_RdfQueryAdapter):
             raise RuntimeError("persistent worker is already open")
         command = self._adapter.worker_command(
             host_artifact=self._artifact,
-            container_name=self._container_name,
+            container_name=self._worker_name,
         )
         self._process = subprocess.Popen(
             command,
@@ -122,17 +131,26 @@ class PersistentJsonlQueryAdapter(_RdfQueryAdapter):
             )
             if message is None:
                 raise RuntimeError("persistent worker startup timed out")
-            expected = {
-                "kind": "ready",
-                "protocol": "jsonl-v1",
-                "source_open": True,
-                "source_type": "hdt",
-                "source_boundary": "comunica-query-source-identify",
-                "source_reference": self._adapter.container_artifact,
-            }
+            contract = getattr(self._adapter, "ready_response_contract", None)
+            if callable(contract):
+                expected = contract()
+                error_label = "verified persistent worker"
+            elif hasattr(self._adapter, "container_artifact"):
+                expected = {
+                    "kind": "ready",
+                    "protocol": "jsonl-v1",
+                    "source_open": True,
+                    "source_type": "hdt",
+                    "source_boundary": "comunica-query-source-identify",
+                    "source_reference": self._adapter.container_artifact,
+                }
+                error_label = "verified HDT worker"
+            else:
+                expected = {"kind": "ready", "protocol": "jsonl-v1"}
+                error_label = "persistent worker"
             if message != expected:
                 raise RuntimeError(
-                    f"invalid verified HDT worker ready response: {message!r}"
+                    f"invalid {error_label} ready response: {message!r}"
                 )
         except BaseException:
             self._force_stop()
