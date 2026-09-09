@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import sys, tempfile, unittest
+import json, subprocess, sys, tempfile, unittest
 from pathlib import Path
 from unittest.mock import MagicMock
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -11,6 +11,40 @@ class Tests(unittest.TestCase):
         hdt=root/"dataset.hdt"; hdt.write_bytes(b"hdt")
         Path(str(hdt)+".index.v1-1").write_bytes(b"index")
         return hdt
+    def test_worker_source_reserves_stdout_and_uses_rdflib_classes(self):
+        root = Path(__file__).resolve().parents[1]
+        source = (root / "bench_executor/hdt_rdflib_jsonl_worker.py").read_text()
+        self.assertIn("PROTOCOL = os.fdopen(os.dup(sys.stdout.fileno())", source)
+        self.assertIn("os.dup2(sys.stderr.fileno(), sys.stdout.fileno())", source)
+        self.assertIn("isinstance(value, URIRef)", source)
+        self.assertIn("isinstance(value, BNode)", source)
+        self.assertIn("isinstance(value, Literal)", source)
+        self.assertNotIn("value.term_type", source)
+
+    def test_worker_term_serializer_with_real_rdflib_terms(self):
+        root = Path(__file__).resolve().parents[1]
+        runtime = root.parent / ".runtime/rdflib-hdt-3.3/bin/python"
+        worker = root / "bench_executor/hdt_rdflib_jsonl_worker.py"
+        self.assertTrue(runtime.is_file(), runtime)
+        self.assertTrue(worker.is_file(), worker)
+        code = (
+            "import importlib.util,json,sys; "
+            "from rdflib import URIRef,BNode,Literal; "
+            "s=importlib.util.spec_from_file_location('worker',sys.argv[1]); "
+            "m=importlib.util.module_from_spec(s); s.loader.exec_module(m); "
+            "print(json.dumps([m.term(URIRef('urn:x')),m.term(BNode('b1')),"
+            "m.term(Literal('hello',lang='en'))]))"
+        )
+        result = subprocess.run(
+            [str(runtime), "-c", code, str(worker)],
+            text=True, capture_output=True, check=True,
+        )
+        value = json.loads(result.stdout)
+        self.assertEqual(value[0], {"type": "uri", "value": "urn:x"})
+        self.assertEqual(value[1], {"type": "bnode", "value": "b1"})
+        self.assertEqual(value[2]["type"], "literal")
+        self.assertEqual(value[2]["language"], "en")
+
     def test_local_backend_uses_isolated_worker_contract(self):
         with tempfile.TemporaryDirectory() as directory:
             backend=HdtRdflibOptimizedSystemAdapter(); hdt=self.pair(Path(directory))

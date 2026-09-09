@@ -1,26 +1,51 @@
 #!/usr/bin/env python3
 """Persistent JSONL SPARQL worker for optimized rdflib-hdt."""
 from __future__ import annotations
+import contextlib
 import json
+import os
 import sys
 import traceback
 from pathlib import Path
 from rdflib_hdt import HDTStore, optimize_sparql
-from rdflib import Graph
+from rdflib import BNode, Graph, Literal, URIRef
+
+# Keep one duplicate of the original stdout pipe for JSONL protocol output.
+# Query diagnostics are redirected at the file-descriptor boundary.
+PROTOCOL = os.fdopen(os.dup(sys.stdout.fileno()), "w", buffering=1)
+
+
+@contextlib.contextmanager
+def query_diagnostics_to_stderr():
+    """Reserve stdout for JSONL even when dependencies print diagnostics."""
+    sys.stdout.flush()
+    saved_stdout = os.dup(sys.stdout.fileno())
+    try:
+        os.dup2(sys.stderr.fileno(), sys.stdout.fileno())
+        yield
+    finally:
+        sys.stdout.flush()
+        os.dup2(saved_stdout, sys.stdout.fileno())
+        os.close(saved_stdout)
+
+
+def emit(value):
+    PROTOCOL.write(json.dumps(value, separators=(",", ":")) + "\n")
+    PROTOCOL.flush()
 
 
 def term(value):
     if value is None:
         return None
-    if value.term_type == "URIRef":
+    if isinstance(value, URIRef):
         return {"type": "uri", "value": str(value)}
-    if value.term_type == "BNode":
+    if isinstance(value, BNode):
         return {"type": "bnode", "value": str(value)}
-    if value.term_type == "Literal":
+    if isinstance(value, Literal):
         return {"type": "literal", "value": str(value),
                 "language": value.language or None,
                 "datatype": str(value.datatype) if value.datatype else None}
-    raise TypeError(f"unsupported RDF term: {value.term_type}")
+    raise TypeError(f"unsupported RDF term class: {type(value).__name__}")
 
 
 def document(result):
@@ -49,25 +74,27 @@ def main():
     optimize_sparql()
     store = HDTStore(str(artifact), mapped=False, indexed=True, safe_mode=True)
     graph = Graph(store=store)
-    print(json.dumps({"kind":"ready","protocol":"jsonl-v1","source_open":True,
+    emit({"kind":"ready","protocol":"jsonl-v1","source_open":True,
         "source_type":"hdt-rdflib","source_boundary":"rdflib-hdt-optimized-bgp",
         "source_reference":str(artifact),"mapped":False,"indexed":True,
-        "safe_mode":True,"optimize_sparql_calls":1}), flush=True)
+        "safe_mode":True,"optimize_sparql_calls":1})
     try:
         for line in sys.stdin:
             request = json.loads(line)
             if request.get("kind") == "shutdown":
-                print(json.dumps({"kind":"stopped"}), flush=True)
+                emit({"kind":"stopped"})
                 return
             request_id = request.get("request_id")
             try:
-                result = graph.query(request["query"])
-                print(json.dumps({"kind":"result","request_id":request_id,
-                    "status":"ok","document":document(result)}, separators=(",", ":")), flush=True)
+                with query_diagnostics_to_stderr():
+                    result = graph.query(request["query"])
+                    result_document = document(result)
+                emit({"kind":"result","request_id":request_id,
+                      "status":"ok","document":result_document})
             except BaseException as error:
-                print(json.dumps({"kind":"result","request_id":request_id,
-                    "status":"error","error_type":type(error).__name__,
-                    "error_message":str(error)}), flush=True)
+                emit({"kind":"result","request_id":request_id,
+                      "status":"error","error_type":type(error).__name__,
+                      "error_message":str(error)})
     finally:
         graph.close()
 
