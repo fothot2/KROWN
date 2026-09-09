@@ -126,6 +126,14 @@ class PersistentJsonlQueryAdapter(_RdfQueryAdapter):
             self._force_stop()
             raise
 
+    def prepare_for_attempt(self) -> bool:
+        process = self._process
+        if process is None or process.poll() is not None:
+            self._force_stop()
+            self.open()
+            return True
+        return False
+
     def execute(self, query):
         process = self._process
         if process is None:

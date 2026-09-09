@@ -145,6 +145,15 @@ class _RdfQueryAdapter:
         """Return the stable name of the measured memory boundary."""
         return None
 
+    @property
+    def supports_load_temperature(self) -> bool:
+        """Return whether repeated open calls measure the same artifact."""
+        return False
+
+    def prepare_for_attempt(self) -> bool:
+        """Restore a worker before query timing and report whether it reopened."""
+        return False
+
 
 @dataclasses.dataclass(frozen=True)
 class _QueryManifest:
@@ -450,8 +459,12 @@ class _RdfQueryBenchmark:
         phase_index = 0
         run_started_ns = time.perf_counter_ns()
         resource_before = _resource_snapshot()
-        open_ns = 0
+        process_cold_open_ns = 0
+        process_warm_open_ns = 0
+        restart_open_ns = 0
+        load_transition_shutdown_ns = 0
         close_ns = 0
+        load_temperature_status = 'unsupported'
         memory_sampler = None
         phase_memory_metrics = None
 
@@ -470,9 +483,31 @@ class _RdfQueryBenchmark:
                     )
                     memory_sampler.start()
                     memory_sampler.set_phase('artifact_open_or_load')
-                open_started_ns = time.perf_counter_ns()
-                shared_adapter.open()
-                open_ns += time.perf_counter_ns() - open_started_ns
+                if shared_adapter.supports_load_temperature:
+                    load_temperature_status = 'ok'
+                    if memory_sampler is not None:
+                        memory_sampler.set_phase('process_cold_load_or_parse')
+                    open_started_ns = time.perf_counter_ns()
+                    shared_adapter.open()
+                    process_cold_open_ns = time.perf_counter_ns() - open_started_ns
+                    if memory_sampler is not None:
+                        memory_sampler.snapshot()
+                    transition_started_ns = time.perf_counter_ns()
+                    shared_adapter.close()
+                    load_transition_shutdown_ns = (
+                        time.perf_counter_ns() - transition_started_ns
+                    )
+                    if memory_sampler is not None:
+                        memory_sampler.set_phase('process_warm_load_or_parse')
+                    open_started_ns = time.perf_counter_ns()
+                    shared_adapter.open()
+                    process_warm_open_ns = time.perf_counter_ns() - open_started_ns
+                    if memory_sampler is not None:
+                        memory_sampler.snapshot()
+                else:
+                    open_started_ns = time.perf_counter_ns()
+                    shared_adapter.open()
+                    process_cold_open_ns = time.perf_counter_ns() - open_started_ns
 
             if self._manifest.schedule is not None:
                 phase_field = self._manifest.schedule['phase_field']
@@ -528,7 +563,19 @@ class _RdfQueryBenchmark:
                             adapter = self._adapter_factory()
                             open_started_ns = time.perf_counter_ns()
                             adapter.open()
-                            open_ns += time.perf_counter_ns() - open_started_ns
+                            restart_open_ns += time.perf_counter_ns() - open_started_ns
+                        if self._lifecycle == 'shared':
+                            restart_started_ns = time.perf_counter_ns()
+                            restarted = adapter.prepare_for_attempt()
+                            restart_elapsed_ns = time.perf_counter_ns() - restart_started_ns
+                            if restarted:
+                                restart_open_ns += restart_elapsed_ns
+                                if memory_sampler is not None:
+                                    memory_sampler.set_phase(
+                                        'restart_load_or_parse'
+                                    )
+                                    memory_sampler.snapshot()
+                                    memory_sampler.set_phase(phase)
                         self._progress_line(
                             'start', ordinal, total_attempts, record, adapter,
                             failure_count,
@@ -579,7 +626,10 @@ class _RdfQueryBenchmark:
             for record in records if record.get('phase') == 'measured'
         )
         total_wall_ns = time.perf_counter_ns() - run_started_ns
-        classified_ns = open_ns + warmup_ns + measured_ns + close_ns
+        classified_ns = (
+            process_cold_open_ns + process_warm_open_ns + restart_open_ns
+            + load_transition_shutdown_ns + warmup_ns + measured_ns + close_ns
+        )
         if classified_ns > total_wall_ns:
             raise RuntimeError('query lifecycle stages exceed total wall time')
         resource_metrics = _resource_delta(resource_before, _resource_snapshot())
@@ -587,7 +637,9 @@ class _RdfQueryBenchmark:
             'schema': 'rdf-query-lifecycle-timing-v1',
             'clock': 'perf_counter_ns',
             'stages_ns': {
-                'artifact_open_or_load': open_ns,
+                'artifact_open_or_load': process_cold_open_ns + process_warm_open_ns,
+                'restart_load_or_parse': restart_open_ns,
+                'load_transition_shutdown': load_transition_shutdown_ns,
                 'warmup': warmup_ns,
                 'measured': measured_ns,
                 'engine_shutdown': close_ns,
@@ -600,6 +652,19 @@ class _RdfQueryBenchmark:
                 **resource_metrics,
             },
             'phase_memory_metrics': phase_memory_metrics,
+            'load_temperature_metrics': {
+                'schema': 'rdf-load-temperature-metrics-v1',
+                'clock': 'perf_counter_ns',
+                'status': load_temperature_status,
+                'process_cold_load_or_parse_ns': (
+                    process_cold_open_ns if load_temperature_status == 'ok' else None
+                ),
+                'process_warm_load_or_parse_ns': (
+                    process_warm_open_ns if load_temperature_status == 'ok' else None
+                ),
+                'restart_load_or_parse_ns': restart_open_ns,
+                'semantics': 'same-artifact-reopen-in-persistent-benchmark-process',
+            },
             'execution_mode': {
                 'process_temperature': (
                     'warm-process' if self._lifecycle == 'shared'

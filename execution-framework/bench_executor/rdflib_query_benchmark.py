@@ -84,6 +84,10 @@ class _RdfLibAdapter(_RdfQueryAdapter):
             self._engine, self._artifact_path, self._vortex_layout
         )
 
+    @property
+    def supports_load_temperature(self) -> bool:
+        return True
+
     def execute(self, query: str) -> _QueryOutcome:
         if self._graph is None:
             raise RuntimeError('RDFLib adapter is not open')
@@ -318,6 +322,7 @@ class _WorkerRdfLibAdapter(_RdfQueryAdapter):
         self._process = None
         self._next_request_id = 0
         self._worker_starts = 0
+        self._recovery_restarts = 0
         self._startup_resource_metrics = None
 
     @property
@@ -327,6 +332,19 @@ class _WorkerRdfLibAdapter(_RdfQueryAdapter):
     @property
     def memory_scope(self) -> str:
         return 'rdflib-worker-process-tree'
+
+    @property
+    def supports_load_temperature(self) -> bool:
+        return True
+
+    def prepare_for_attempt(self) -> bool:
+        if (self._connection is None or self._process is None
+                or not self._process.is_alive()):
+            self._discard()
+            self.open()
+            self._recovery_restarts += 1
+            return True
+        return False
 
     def current_rss_bytes(self) -> int | None:
         process = self._process
@@ -338,7 +356,7 @@ class _WorkerRdfLibAdapter(_RdfQueryAdapter):
         process = self._process
         return {
             'worker_pid': process.pid if process is not None and process.is_alive() else 'none',
-            'worker_restarts': max(0, self._worker_starts - 1),
+            'worker_restarts': self._recovery_restarts,
         }
 
     def _discard(self) -> None:
@@ -391,8 +409,7 @@ class _WorkerRdfLibAdapter(_RdfQueryAdapter):
     def execute(self, query: str) -> _QueryOutcome:
         if (self._connection is None or self._process is None
                 or not self._process.is_alive()):
-            self._discard()
-            self.open()
+            raise RuntimeError('RDFLib worker is not prepared for query execution')
         request_id = self._next_request_id
         self._next_request_id += 1
         self._connection.send({

@@ -871,6 +871,7 @@ class RdfExperimentMatrixResource:
                 build_metrics = None
                 representation_size = None
                 execution_mode = None
+                load_temperature_metrics = None
                 strategy = _execution_strategy(specification)
                 if strategy == "sparql-http":
                     arguments = _constructor_arguments(
@@ -920,6 +921,7 @@ class RdfExperimentMatrixResource:
                     build_metrics = lifecycle.build_metrics
                     representation_size = lifecycle.representation_size
                     execution_mode = query_lifecycle["execution_mode"]
+                    load_temperature_metrics = query_lifecycle.get("load_temperature_metrics")
                     execute_wall_ns = lifecycle.operation_timings_ns.get("execute", 0)
                     query_classified_ns = sum(query_stages.values())
                     if query_classified_ns > execute_wall_ns:
@@ -992,6 +994,7 @@ class RdfExperimentMatrixResource:
                     resource_metrics = query_lifecycle["resource_metrics"]
                     phase_memory_metrics = query_lifecycle.get("phase_memory_metrics")
                     execution_mode = query_lifecycle["execution_mode"]
+                    load_temperature_metrics = query_lifecycle.get("load_temperature_metrics")
                     lifecycle_stages_ns = {
                         "preflight": 0,
                         "artifact_open_or_load": query_stages["artifact_open_or_load"],
@@ -1016,6 +1019,7 @@ class RdfExperimentMatrixResource:
                     resource_metrics = query_lifecycle["resource_metrics"]
                     phase_memory_metrics = query_lifecycle.get("phase_memory_metrics")
                     execution_mode = dict(query_lifecycle["execution_mode"])
+                    load_temperature_metrics = query_lifecycle.get("load_temperature_metrics")
                     execution_mode.update(
                         {
                             "storage": "file-backed",
@@ -1069,6 +1073,7 @@ class RdfExperimentMatrixResource:
                 system_stages_ns["unclassified"] = unclassified_ns
                 summary["resource_metrics"] = resource_metrics
                 summary["phase_memory_metrics"] = phase_memory_metrics
+                summary["load_temperature_metrics"] = load_temperature_metrics
                 summary["build_metrics"] = build_metrics
                 summary["representation_size"] = representation_size
                 summary["execution_mode"] = execution_mode or {

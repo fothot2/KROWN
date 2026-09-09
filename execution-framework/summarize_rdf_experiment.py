@@ -109,6 +109,7 @@ def build_report(summary: Mapping[str, Any]) -> dict[str, Any]:
             f"experiment {index}.phase_memory_metrics",
         )
         mode = experiment.get("execution_mode") or {}
+        load_temperature = experiment.get("load_temperature_metrics") or {}
         stages = timing["stages_ns"]
         rows.append({
             "system": experiment.get("system"),
@@ -128,6 +129,16 @@ def build_report(summary: Mapping[str, Any]) -> dict[str, Any]:
             ),
             "system_total_ms": _milliseconds(timing["total_wall_ns"]),
             "open_or_load_ms": _milliseconds(stages.get("artifact_open_or_load", 0)),
+            "load_temperature_status": load_temperature.get("status"),
+            "process_cold_load_or_parse_ms": _milliseconds(
+                load_temperature.get("process_cold_load_or_parse_ns")
+            ),
+            "process_warm_load_or_parse_ms": _milliseconds(
+                load_temperature.get("process_warm_load_or_parse_ns")
+            ),
+            "restart_load_or_parse_ms": _milliseconds(
+                load_temperature.get("restart_load_or_parse_ns")
+            ),
             "startup_ms": _milliseconds(stages.get("engine_startup", 0)),
             "shutdown_ms": _milliseconds(stages.get("engine_shutdown", 0)),
             "validation_ms": _milliseconds(stages.get("validation", 0)),
