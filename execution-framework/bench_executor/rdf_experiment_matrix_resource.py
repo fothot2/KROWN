@@ -34,6 +34,12 @@ from bench_executor.rdf_query_benchmark import (
 from bench_executor.rdflib_query_benchmark import RdfLibQueryBenchmark
 from bench_executor.query_quarantine_resolver import validate_snapshot
 from bench_executor.query_quarantine_probe import select_probe_rules, validate_probe_policy
+from bench_executor.query_quarantine_runtime import (
+    binding_runtime_provenance,
+    load_runtime_orchestration,
+    matrix_runtime_provenance,
+    runtime_probe_rules,
+)
 from bench_executor.persistent_jsonl_query_adapter import PersistentJsonlQueryAdapter
 from bench_executor.sparql_http_benchmark import SparqlHttpBenchmark
 from bench_executor.sparql_result import normalize_sparql_json_result
@@ -671,9 +677,12 @@ def _publish_result_bundle(
     error: str | None = None,
     matrix_started_ns: int | None = None,
     matrix_stages_ns: Mapping[str, int] | None = None,
+    orchestration_provenance: Mapping[str, Any] | None = None,
 ) -> None:
     """Publish one compact atomic summary and archive."""
     summary = {"status": status, "experiments": experiments}
+    if orchestration_provenance is not None:
+        summary["runtime_orchestration"] = dict(orchestration_provenance)
     if failed_system is not None:
         summary["failed_system"] = failed_system
     if error is not None:
@@ -894,9 +903,9 @@ class RdfExperimentMatrixResource:
         failure_output_file: str | None = None,
         force_include: bool = False,
         quarantine_snapshot_file: str | None = None,
-        quarantine_probe_policy: Mapping[str, Any] | None = None,
-        completed_compatible_runs: int = 0,
-        matrix_run_id: str = "run-0",
+        quarantine_probe_policy_file: str | None = None,
+        completed_compatible_runs: int | None = None,
+        matrix_run_id: str | None = None,
     ) -> bool:
         """Execute selected declaration bindings and publish summary plus archive."""
         self.last_outcome = "success"
@@ -915,6 +924,14 @@ class RdfExperimentMatrixResource:
             quarantine_snapshot_path = (
                 input_file(str(self._shared), quarantine_snapshot_file)
                 if quarantine_snapshot_file is not None else None
+            )
+            runtime = load_runtime_orchestration(
+                self._shared,
+                quarantine_snapshot_file,
+                quarantine_probe_policy_file,
+                completed_compatible_runs,
+                matrix_run_id,
+                force_include,
             )
             environment_selection = _environment_system_selection(selected_systems_env)
             if selected_systems is not None and environment_selection is not None:
@@ -990,11 +1007,7 @@ class RdfExperimentMatrixResource:
                 automatic_rules = _automatic_quarantine_rules(
                     quarantine_snapshot_path, manifest, system_id
                 )
-                probe_rules = ()
-                if quarantine_probe_policy is not None and quarantine_snapshot_path is not None:
-                    snapshot_value = json.loads(quarantine_snapshot_path.read_text(encoding="utf-8"))
-                    validate_probe_policy(quarantine_probe_policy)
-                    probe_rules = select_probe_rules(snapshot_value, quarantine_probe_policy, completed_compatible_runs, matrix_run_id, system_id)
+                probe_rules = runtime_probe_rules(runtime, system_id)
                 strategy = _execution_strategy(specification)
                 if strategy == "sparql-http":
                     arguments = _constructor_arguments(
@@ -1176,6 +1189,9 @@ class RdfExperimentMatrixResource:
                 measured_ns = time.perf_counter_ns() - measured_started_ns
                 validation_started_ns = time.perf_counter_ns()
                 summary = _result_summary(output_path, experiment, representation)
+                summary["runtime_orchestration"] = binding_runtime_provenance(
+                    runtime, probe_rules
+                )
                 summary["status"] = (
                     "ok" if summary["failure_count"] == 0 else "completed_with_failures"
                 )
@@ -1249,6 +1265,9 @@ class RdfExperimentMatrixResource:
                     "artifact_open_or_load": artifact_ns,
                     "measured": execution_ns,
                 },
+                orchestration_provenance=matrix_runtime_provenance(
+                    runtime, summaries
+                ),
             )
             if failure_results_file is not None and failure_output_file is not None:
                 stale_summary = resolve_shared_path(
@@ -1286,6 +1305,10 @@ class RdfExperimentMatrixResource:
                         "failed",
                         current_system,
                         message,
+                        orchestration_provenance=(
+                            matrix_runtime_provenance(runtime, summaries)
+                            if "runtime" in locals() else None
+                        ),
                     )
                     success_summary = resolve_shared_path(
                         str(self._shared), results_file, "Output"
