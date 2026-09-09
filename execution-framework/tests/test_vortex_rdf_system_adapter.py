@@ -60,8 +60,8 @@ class VortexRdfSystemAdapterTests(unittest.TestCase):
             command = adapter.docker_smoke_command(
                 "SELECT * WHERE { ?s ?p ?o } LIMIT 1"
             )
-            self.assertIn("VortexStore", command[-1])
-            self.assertIn("cottas-native-ids", command[-1])
+            self.assertIn("VortexRdflibStore", command[-1])
+            self.assertIn("path=", command[-1])
 
     def test_rejects_representation_mismatch(self):
         with tempfile.TemporaryDirectory() as directory:

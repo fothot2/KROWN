@@ -172,9 +172,8 @@ class VortexRdfSystemAdapter:
             raise ValueError("container_artifact must be an absolute .vortex path")
         code = (
             "from rdflib import Graph; "
-            "from vortex_rdflib import VortexStore; "
-            f"g=Graph(store=VortexStore({container_artifact!r}, "
-            f"layout={self.runtime.store_layout!r}, backend={self.runtime.backend!r})); "
+            "from vortex_rdflib import VortexRdflibStore; "
+            f"g=Graph(store=VortexRdflibStore(path={container_artifact!r})); "
             f"rows=list(g.query({sparql_query!r})); print(len(rows)); g.close()"
         )
         return [

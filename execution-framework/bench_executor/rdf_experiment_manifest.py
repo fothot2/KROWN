@@ -5,7 +5,7 @@ import importlib,json
 from pathlib import Path
 from typing import Any
 from bench_executor.dataset_artifact_receipt import load_dataset_artifact_receipt
-from bench_executor.experiment_matrix_contract import DatasetArtifact,ExperimentSpecification
+from bench_executor.experiment_matrix_contract import DatasetArtifact,ExperimentSpecification,SystemConfiguration
 from bench_executor.sparql_http_system_adapter import sparql_http_system_specifications
 from bench_executor.comunica_hdt_system_adapter import adapter_specification as comunica_specification
 from bench_executor.cottas_standalone_system_adapter import adapter_specification as cottas_specification
@@ -13,8 +13,24 @@ from bench_executor.vortex_rdf_system_adapter import VortexRdfRuntimeConfigurati
 from bench_executor.rdflib_system_adapter import adapter_specification as rdflib_specification
 from bench_executor.system_adapter_contract import SystemAdapterSpecification
 SCHEMA="rdf-experiment-declaration-v1"
+def _vortex_rdf_specifications()->tuple[SystemAdapterSpecification,...]:
+ base=VortexRdfRuntimeConfiguration().adapter_specification()
+ variants=(
+  ("dictionary-secondary-by-reference","vortex-rdf/dictionary-secondary-by-reference","secondary-by-reference",False),
+  ("dictionary-secondary-by-reference-memory","vortex-rdf/dictionary-secondary-by-reference","secondary-by-reference",True),
+  ("dictionary-secondary-by-copy","vortex-rdf/dictionary-secondary-by-copy","secondary-by-copy",False),
+  ("dictionary-secondary-by-copy-memory","vortex-rdf/dictionary-secondary-by-copy","secondary-by-copy",True),
+ )
+ result=[]
+ for configuration,representation,index_type,in_memory in variants:
+  storage_mode="in-memory" if in_memory else "file-backed"
+  system_configuration=SystemConfiguration(system="vortex-rdf",configuration=configuration,kind="embedded",representation=representation,parameters={"layout":"dictionary","index_type":index_type,"storage_mode":storage_mode,"vortex_in_memory":in_memory})
+  parameters=dict(base.parameters); parameters.pop("vortex_layout",None)
+  parameters.update({"engine":"vortex","execution_strategy":"rdflib-worker","storage_mode":storage_mode,"vortex_in_memory":in_memory})
+  result.append(SystemAdapterSpecification(configuration=system_configuration,adapter=base.adapter,capabilities=base.capabilities,parameters=parameters))
+ return tuple(result)
 def system_adapter_specifications()->tuple[SystemAdapterSpecification,...]:
- specifications=(*sparql_http_system_specifications(),comunica_specification(),cottas_specification(),VortexRdfRuntimeConfiguration().adapter_specification(),rdflib_specification())
+ specifications=(*sparql_http_system_specifications(),comunica_specification(),cottas_specification(),*_vortex_rdf_specifications(),rdflib_specification())
  if len({item.system_id for item in specifications})!=len(specifications): raise ValueError("system adapter IDs must be unique")
  return specifications
 def _contained(root:Path,value:Any,field:str)->Path:
@@ -26,8 +42,10 @@ def _contained(root:Path,value:Any,field:str)->Path:
 def load_rdf_experiment_declaration(path:str|Path)->tuple[tuple[ExperimentSpecification,...],dict[str,DatasetArtifact]]:
  declaration_path=Path(path).expanduser().resolve(); root=declaration_path.parents[1]; value=json.loads(declaration_path.read_text(encoding="utf-8"))
  if not isinstance(value,dict) or value.get("schema")!=SCHEMA: raise ValueError("unsupported RDF experiment declaration")
- required={"schema","experiment","benchmark","dataset","workload","inventory","representations","bindings","execution_policy","semantic_baseline"}
- if set(value)!=required: raise ValueError("RDF experiment declaration has unexpected fields")
+ required={"schema","experiment","benchmark","dataset","workload","inventory","representations","bindings","execution_policy"}
+ optional={"semantic_baseline"}
+ fields=set(value)
+ if not required.issubset(fields) or fields.difference(required|optional): raise ValueError("RDF experiment declaration has unexpected fields")
  representations=value["representations"]
  if not isinstance(representations,dict) or not representations: raise ValueError("representations must be a non-empty object")
  artifacts={identifier:load_dataset_artifact_receipt(str(_contained(root,receipt,"representation receipt"))) for identifier,receipt in representations.items()}

@@ -1126,6 +1126,10 @@ class RdfExperimentMatrixResource:
                         query_parameters["vortex_layout"] = specification.parameters[
                             "vortex_layout"
                         ]
+                    if specification.parameters.get("engine") == "vortex":
+                        query_parameters["vortex_in_memory"] = specification.parameters[
+                            "vortex_in_memory"
+                        ]
                     if not query.execute(**query_parameters):
                         raise RuntimeError(
                             f"RDFLib-backed execution failed for {system_id}"

@@ -98,7 +98,7 @@ class RdfExperimentMatrixResourceTests(unittest.TestCase):
         experiment=SimpleNamespace(experiment_id='sample/run/rdflib',system_configuration='rdflib/default')
         artifact=DatasetArtifact('sample','tiny','ntriples',1,'a'*64,'rdf/source',(ArtifactFile('x.nt',1,'b'*64),))
         configuration=SystemConfiguration('rdflib','default','embedded','rdf/source',parameters={'image':'dtaikg/rdflib:7.6.0'})
-        specification=SimpleNamespace(system_id='rdflib/default', configuration=configuration, adapter='bench_executor.rdflib_system_adapter:RdfLibSystemAdapter', parameters={'engine':'default'})
+        specification=SimpleNamespace(system_id='rdflib/default', configuration=configuration, adapter='bench_executor.rdflib_system_adapter:RdfLibSystemAdapter', parameters={'engine':'default','execution_strategy':'rdflib-worker'})
         with tempfile.TemporaryDirectory() as directory:
             declaration=Path(directory)/'declaration.json'; manifest=Path(directory)/'manifest.json'
             declaration.write_text('{}'); manifest.write_text(json.dumps({'schema_version':1,'workload':'sample-smoke','dataset':'tiny','query_count':1,'queries':[{'query_id':'q1','query':'ASK { ?s ?p ?o }'}]}))
@@ -112,7 +112,7 @@ class RdfExperimentMatrixResourceTests(unittest.TestCase):
         experiment=SimpleNamespace(experiment_id='sample/run/comunica',system_configuration='comunica/hdt')
         artifact=DatasetArtifact('sample','tiny','binary',1,'a'*64,'hdt/default',(ArtifactFile('x.hdt',1,'b'*64),))
         configuration=SystemConfiguration('comunica','hdt','file-backed','hdt/default',parameters={'image':'dtaikg/comunica-hdt:v5.0.1'})
-        specification=SimpleNamespace(system_id='comunica/hdt',configuration=configuration,adapter='bench_executor.comunica_hdt_system_adapter:ComunicaHdtSystemAdapter',parameters={'engine':'comunica-hdt'})
+        specification=SimpleNamespace(system_id='comunica/hdt',configuration=configuration,adapter='bench_executor.comunica_hdt_system_adapter:ComunicaHdtSystemAdapter',parameters={'engine':'comunica-hdt','execution_strategy':'persistent-jsonl'})
         with tempfile.TemporaryDirectory() as directory:
             declaration=Path(directory)/'declaration.json'; manifest=Path(directory)/'manifest.json'; declaration.write_text('{}'); manifest.write_text(json.dumps({'schema_version':1,'workload':'sample-smoke','dataset':'tiny','query_count':1,'queries':[{'query_id':'q1','query':'ASK { ?s ?p ?o }'}]}))
             daemon=SimpleNamespace(returncode=0,stdout='"29.1.3"',stderr='')
@@ -124,7 +124,7 @@ class RdfExperimentMatrixResourceTests(unittest.TestCase):
         experiment=SimpleNamespace(experiment_id='sample/run/qlever',system_configuration='qlever/default')
         artifact=DatasetArtifact('sample','tiny','ntriples',1,'a'*64,'rdf/source',(ArtifactFile('x.nt',1,'b'*64),))
         configuration=SystemConfiguration('qlever','default','server','rdf/source')
-        specification=SimpleNamespace(system_id='qlever/default',configuration=configuration,adapter='bench_executor.qlever_system_adapter:QLeverSystemAdapter',parameters={})
+        specification=SimpleNamespace(system_id='qlever/default',configuration=configuration,adapter='bench_executor.qlever_system_adapter:QLeverSystemAdapter',parameters={'execution_strategy':'sparql-http'})
         with tempfile.TemporaryDirectory() as directory:
             declaration=Path(directory)/'declaration.json'; manifest=Path(directory)/'manifest.json'; declaration.write_text('{}'); manifest.write_text(json.dumps({'schema_version':1,'workload':'sample-smoke','dataset':'tiny','query_count':1,'queries':[{'query_id':'q1','query':'ASK { ?s ?p ?o }'}]}))
             daemon=SimpleNamespace(returncode=0,stdout='"29.1.3"',stderr='')

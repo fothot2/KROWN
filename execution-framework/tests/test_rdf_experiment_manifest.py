@@ -4,7 +4,7 @@ from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from bench_executor.rdf_experiment_manifest import load_rdf_experiment_declaration,resolve_adapter_classes
 REP={"rdf/source":"rdf.json","hdt/default":"hdt.json","cottas/default":"cottas.json","vortex-rdf/simple-dictionary-native-rdf-store":"vortex.json"}
-SYS=[("fuseki/default","rdf/source"),("virtuoso/default","rdf/source"),("qlever/default","rdf/source"),("oxigraph/memory","rdf/source"),("oxigraph/rocksdb","rdf/source"),("comunica/hdt","hdt/default"),("pycottas/default","cottas/default"),("vortex-rdf/simple-dictionary-native-rdf-store","vortex-rdf/simple-dictionary-native-rdf-store"),("rdflib/default","rdf/source")]
+SYS=[("fuseki/memory","rdf/source"),("fuseki/tdb2","rdf/source"),("virtuoso/default","rdf/source"),("qlever/default","rdf/source"),("oxigraph/memory","rdf/source"),("oxigraph/rocksdb","rdf/source"),("comunica/hdt","hdt/default"),("pycottas/default","cottas/default"),("vortex-rdf/simple-dictionary-native-rdf-store","vortex-rdf/simple-dictionary-native-rdf-store"),("rdflib/default","rdf/source")]
 class RdfExperimentManifestTests(unittest.TestCase):
  def setUp(self):
   self.tmp=tempfile.TemporaryDirectory(); root=Path(self.tmp.name)/"BSBM"; exp=root/"experiments"; data=root/"data"; exp.mkdir(parents=True); data.mkdir()

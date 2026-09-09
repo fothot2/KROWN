@@ -65,13 +65,14 @@ class _RdfLibAdapter(_RdfQueryAdapter):
     """Execute SPARQL with one RDFLib Graph and consume all result rows."""
 
     def __init__(self, engine: str, artifact_path: str,
-                 vortex_layout: str, correctness_mode: str = 'none',
+                 vortex_layout: str, vortex_in_memory: bool = False, correctness_mode: str = 'none',
                  full_result_max_rows: int = 10000):
         if engine not in SUPPORTED_ENGINES:
             raise ValueError(f'Unsupported RDFLib engine: {engine}')
         self._engine = engine
         self._artifact_path = artifact_path
         self._vortex_layout = vortex_layout
+        self._vortex_in_memory = vortex_in_memory
         self._correctness_mode = correctness_mode
         self._full_result_max_rows = full_result_max_rows
         self._graph = None
@@ -81,7 +82,8 @@ class _RdfLibAdapter(_RdfQueryAdapter):
             raise RuntimeError('RDFLib adapter is already open')
 
         self._graph = _make_rdflib_graph(
-            self._engine, self._artifact_path, self._vortex_layout
+            self._engine, self._artifact_path, self._vortex_layout,
+            self._vortex_in_memory
         )
 
     @property
@@ -132,7 +134,7 @@ class _RdfLibAdapter(_RdfQueryAdapter):
 
 
 def _make_rdflib_graph(engine: str, artifact_path: str,
-                       vortex_layout: str) -> Graph:
+                       vortex_layout: str, vortex_in_memory: bool = False) -> Graph:
     """Create one RDFLib graph for a supported prepared artifact."""
     if engine == 'default':
         graph = Graph()
@@ -146,7 +148,9 @@ def _make_rdflib_graph(engine: str, artifact_path: str,
         from vortex_rdflib import VortexRdflibStore
         # Vortex-RDF 0.10 files are self-describing. The store detects the
         # physical layout and indexes from the artifact.
-        store = VortexRdflibStore(path=artifact_path)
+        store = VortexRdflibStore(
+            path=artifact_path, in_memory=vortex_in_memory
+        )
     elif engine == 'cottas':
         from pycottas.cottas_store import COTTASStore
         store = COTTASStore(artifact_path)
@@ -156,13 +160,13 @@ def _make_rdflib_graph(engine: str, artifact_path: str,
 
 
 def _rdflib_worker(connection, engine: str, artifact_path: str,
-                   vortex_layout: str, correctness_mode: str,
+                   vortex_layout: str, vortex_in_memory: bool, correctness_mode: str,
                    full_result_max_rows: int) -> None:
     """Own one RDFLib graph and execute parent-issued queries serially."""
     graph = None
     try:
         graph = _make_rdflib_graph(
-            engine, artifact_path, vortex_layout
+            engine, artifact_path, vortex_layout, vortex_in_memory
         )
         usage = resource.getrusage(resource.RUSAGE_SELF)
         connection.send({
@@ -298,6 +302,7 @@ class _WorkerRdfLibAdapter(_RdfQueryAdapter):
     def __init__(self, engine: str, artifact_path: str,
                  vortex_layout: str, timeout_s: float,
                  startup_timeout_s: float, kill_grace_s: float,
+                 vortex_in_memory: bool = False,
                  correctness_mode: str = 'none',
                  full_result_max_rows: int = 10000):
         if timeout_s <= 0:
@@ -309,6 +314,7 @@ class _WorkerRdfLibAdapter(_RdfQueryAdapter):
         self._engine = engine
         self._artifact_path = artifact_path
         self._vortex_layout = vortex_layout
+        self._vortex_in_memory = vortex_in_memory
         self._timeout_s = timeout_s
         self._startup_timeout_s = startup_timeout_s
         if correctness_mode not in CORRECTNESS_MODES:
@@ -381,6 +387,7 @@ class _WorkerRdfLibAdapter(_RdfQueryAdapter):
                 self._engine,
                 self._artifact_path,
                 self._vortex_layout,
+                self._vortex_in_memory,
                 self._correctness_mode,
                 self._full_result_max_rows,
             ),
@@ -489,6 +496,7 @@ class RdfLibQueryBenchmark:
                 shuffle: bool = False, seed: int = 42,
                 lifecycle: str = 'shared',
                 vortex_layout: str = 'cottas-native-ids',
+                vortex_in_memory: bool = False,
                 skip_after_warmup_timeout: bool = True,
                 skip_after_warmup_error: bool = True,
                 timeout_s: float = 60.0,
@@ -534,6 +542,7 @@ class RdfLibQueryBenchmark:
                         engine=engine,
                         artifact_path=artifact_path,
                         vortex_layout=vortex_layout,
+                        vortex_in_memory=vortex_in_memory,
                         correctness_mode=correctness_mode,
                         full_result_max_rows=full_result_max_rows,
                     )
@@ -546,6 +555,7 @@ class RdfLibQueryBenchmark:
                         timeout_s=timeout_s,
                         startup_timeout_s=startup_timeout_s,
                         kill_grace_s=kill_grace_s,
+                        vortex_in_memory=vortex_in_memory,
                         correctness_mode=correctness_mode,
                         full_result_max_rows=full_result_max_rows,
                     )
@@ -570,7 +580,11 @@ class RdfLibQueryBenchmark:
             records = benchmark.run(output_path)
             self.last_lifecycle_timing = benchmark.last_lifecycle_timing
             self.last_lifecycle_timing['execution_mode'].update({
-                'storage': 'in-memory' if engine == 'default' else 'file-backed',
+                'storage': (
+                    'in-memory' if engine == 'default' or (
+                        engine == 'vortex' and vortex_in_memory
+                    ) else 'file-backed'
+                ),
                 'engine': engine,
                 'timeout_mode': timeout_mode,
             })
