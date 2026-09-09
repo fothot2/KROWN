@@ -39,6 +39,10 @@ class PersistentJsonlQueryAdapter(_RdfQueryAdapter):
     def memory_scope(self) -> str:
         return 'docker-container-cgroup-v2'
 
+    @property
+    def supports_load_temperature(self) -> bool:
+        return True
+
     def current_rss_bytes(self) -> int | None:
         return container_memory_current_bytes(self._container_name)
 
@@ -118,9 +122,17 @@ class PersistentJsonlQueryAdapter(_RdfQueryAdapter):
             )
             if message is None:
                 raise RuntimeError("persistent worker startup timed out")
-            if message != {"kind": "ready", "protocol": "jsonl-v1"}:
+            expected = {
+                "kind": "ready",
+                "protocol": "jsonl-v1",
+                "source_open": True,
+                "source_type": "hdt",
+                "source_boundary": "comunica-query-source-identify",
+                "source_reference": self._adapter.container_artifact,
+            }
+            if message != expected:
                 raise RuntimeError(
-                    f"invalid persistent worker ready response: {message!r}"
+                    f"invalid verified HDT worker ready response: {message!r}"
                 )
         except BaseException:
             self._force_stop()

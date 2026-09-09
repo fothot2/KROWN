@@ -2,6 +2,8 @@
 
 const readline = require("node:readline");
 const { QueryEngine } = require("@comunica/query-sparql-hdt");
+const { ActionContext } = require("@comunica/core");
+const { KeysInitQuery, KeysQueryOperation } = require("@comunica/context-entries");
 
 const artifact = process.argv[2];
 if (!artifact || !artifact.startsWith("/") || !artifact.endsWith(".hdt")) {
@@ -9,15 +11,71 @@ if (!artifact || !artifact.startsWith("/") || !artifact.endsWith(".hdt")) {
 }
 
 const engine = new QueryEngine();
-const context = {
-  sources: [
-    {
-      type: "hdt",
-      value: artifact,
-    },
-  ],
-};
+let identifiedSource = null;
+let context = null;
 const write = value => process.stdout.write(`${JSON.stringify(value)}\n`);
+
+function findUnique(root, predicate, label) {
+  const found = [];
+  const seen = new Set();
+  const queue = [root];
+  while (queue.length > 0) {
+    const value = queue.shift();
+    if (!value || (typeof value !== "object" && typeof value !== "function")
+        || seen.has(value)) continue;
+    seen.add(value);
+    if (predicate(value)) found.push(value);
+    for (const key of Object.keys(value)) {
+      if (["map", "cachedActors", "testCache", "_events"].includes(key)) continue;
+      const child = value[key];
+      if (child && (typeof child === "object" || typeof child === "function")) {
+        queue.push(child);
+      }
+    }
+  }
+  if (found.length !== 1) {
+    throw new Error(`expected one ${label}, found ${found.length}`);
+  }
+  return found[0];
+}
+
+async function openIdentifiedSource() {
+  const actorInitQuery = engine.actorInitQuery;
+  if (!actorInitQuery) throw new Error("engine.actorInitQuery is unavailable");
+  const queryProcessor = findUnique(actorInitQuery, value =>
+    value?.constructor?.name === "ActorQueryProcessSequential"
+      && value.mediatorContextPreprocess && value.mediatorOptimizeQueryOperation,
+  "sequential query processor");
+  const sourceIdentifier = findUnique(actorInitQuery, value =>
+    value?.constructor?.name === "ActorOptimizeQueryOperationQuerySourceIdentify"
+      && typeof value.identifySource === "function"
+      && value.mediatorQuerySourceIdentify,
+  "query source identifier");
+  const preprocessed = await queryProcessor.mediatorContextPreprocess.mediate({
+    context: new ActionContext(),
+    initialize: true,
+  });
+  if (!preprocessed.context.has(KeysInitQuery.dataFactory)) {
+    throw new Error("context preprocessing omitted dataFactory");
+  }
+  identifiedSource = await sourceIdentifier.identifySource(
+    { type: "hdt", value: artifact }, preprocessed.context);
+  if (!identifiedSource?.source
+      || identifiedSource.source.constructor?.name !== "QuerySourceHdt"
+      || identifiedSource.source.referenceValue !== artifact) {
+    throw new Error("HDT source identification returned an invalid source");
+  }
+  context = preprocessed.context
+    .delete(KeysInitQuery.querySourcesUnidentified)
+    .set(KeysQueryOperation.querySources, [identifiedSource]);
+}
+
+async function closeIdentifiedSource() {
+  const source = identifiedSource?.source;
+  identifiedSource = null;
+  context = null;
+  if (source && typeof source.dispose === "function") await source.dispose();
+}
 
 function term(value) {
   if (value === undefined) return null;
@@ -123,6 +181,7 @@ async function materialize(query) {
 
 async function handle(request) {
   if (request.kind === "shutdown") {
+    await closeIdentifiedSource();
     write({ kind: "stopped" });
     process.exit(0);
   }
@@ -162,4 +221,16 @@ input.on("line", line => {
     }
   });
 });
-write({ kind: "ready", protocol: "jsonl-v1" });
+openIdentifiedSource().then(() => {
+  write({
+    kind: "ready",
+    protocol: "jsonl-v1",
+    source_open: true,
+    source_type: "hdt",
+    source_boundary: "comunica-query-source-identify",
+    source_reference: artifact,
+  });
+}).catch(error => {
+  process.stderr.write(`${error.stack || error.message}\n`);
+  process.exit(1);
+});

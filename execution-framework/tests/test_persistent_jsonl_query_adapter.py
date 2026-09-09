@@ -30,6 +30,7 @@ class PersistentJsonlTests(unittest.TestCase):
     @staticmethod
     def adapter():
         return SimpleNamespace(
+            container_artifact="/data/dataset.hdt",
             worker_command=lambda **kwargs: ["docker", "run"],
             force_stop_command=lambda name: [
                 "docker", "rm", "--force", name
@@ -57,7 +58,14 @@ class PersistentJsonlTests(unittest.TestCase):
     def test_one_process_handles_two_queries(self):
         document = {"kind": "select", "variables": ["x"], "rows": []}
         process = self.process([
-            json.dumps({"kind": "ready", "protocol": "jsonl-v1"}) + "\n",
+            json.dumps({
+                "kind": "ready",
+                "protocol": "jsonl-v1",
+                "source_open": True,
+                "source_type": "hdt",
+                "source_boundary": "comunica-query-source-identify",
+                "source_reference": "/data/dataset.hdt",
+            }) + "\n",
             json.dumps({"kind": "result", "request_id": 0,
                         "status": "ok", "document": document}) + "\n",
             json.dumps({"kind": "result", "request_id": 1,
@@ -81,7 +89,14 @@ class PersistentJsonlTests(unittest.TestCase):
 
     def test_timeout_forces_container_removal(self):
         process = self.process([
-            json.dumps({"kind": "ready", "protocol": "jsonl-v1"}) + "\n"
+            json.dumps({
+                "kind": "ready",
+                "protocol": "jsonl-v1",
+                "source_open": True,
+                "source_type": "hdt",
+                "source_boundary": "comunica-query-source-identify",
+                "source_reference": "/data/dataset.hdt",
+            }) + "\n"
         ])
         with patch(
             "bench_executor.persistent_jsonl_query_adapter.subprocess.Popen",
@@ -103,7 +118,14 @@ class PersistentJsonlTests(unittest.TestCase):
 
     def test_eof_reports_worker_stderr_and_forces_cleanup(self):
         process = self.process([
-            json.dumps({"kind": "ready", "protocol": "jsonl-v1"}) + "\n",
+            json.dumps({
+                "kind": "ready",
+                "protocol": "jsonl-v1",
+                "source_open": True,
+                "source_type": "hdt",
+                "source_boundary": "comunica-query-source-identify",
+                "source_reference": "/data/dataset.hdt",
+            }) + "\n",
             "",
         ], returncode=1, stderr="TypeError: queryBindings failed")
         with patch(

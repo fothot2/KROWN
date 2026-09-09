@@ -15,6 +15,8 @@ class ComunicaHdtSystemAdapter:
     @property
     def representation(self):return REPRESENTATION
     @property
+    def container_artifact(self):return CONTAINER_ARTIFACT
+    @property
     def lifecycle(self):return ("prepare","execute","collect")
     def prepare(self,artifact):
         path=Path(artifact).expanduser().resolve()
