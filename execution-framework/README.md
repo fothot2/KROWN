@@ -438,7 +438,7 @@ The BSBM smoke scenario validates 11 measured query instances from the externall
 
 ### Experiment matrix contracts
 
-The experiment matrix separates the logical workload from the query system and the physical dataset representation. `ExperimentSpecification` binds one benchmark, logical dataset, workload, dataset artifact, system configuration, and execution policy. `DatasetArtifact` records the source RDF identity and one physical representation such as `rdf/source`, `hdt/default`, `cottas/default`, or `vortex-rdf/<configuration>`. `SystemConfiguration` records a stable identity such as `fuseki/default`, `virtuoso/default`, `qlever/default`, `comunica/hdt`, `pycottas/default`, or `vortex-rdf/<configuration>`.
+The experiment matrix separates the logical workload from the query system and the physical dataset representation. `ExperimentSpecification` binds one benchmark, logical dataset, workload, dataset artifact, system configuration, and execution policy. `DatasetArtifact` records the source RDF identity and one physical representation such as `rdf/source`, `hdt/default`, `cottas/default`, or `vortex-rdf/<configuration>`. `SystemConfiguration` records a stable identity such as `fuseki/tdb2`, `virtuoso/default`, `qlever/default`, `comunica/hdt`, `pycottas/default`, or `vortex-rdf/<configuration>`.
 
 ### System adapter lifecycle contract
 
@@ -446,11 +446,11 @@ The system adapter lifecycle is separate from the experiment matrix. Server adap
 
 ### SPARQL HTTP server adapter foundation
 
-A SPARQL HTTP server adapter controls one query server that receives SPARQL queries over HTTP. `SparqlHttpSystemAdapter` applies the shared server lifecycle to `fuseki/default`, `virtuoso/default`, and `qlever/default`. Each system requires the `rdf/source` representation. Concrete adapters provide preparation, startup, readiness, shutdown, and collection operations. The shared foundation accepts the workload execution function, passes the endpoint to it, validates operation results, and performs best-effort shutdown and collection after a failure. It does not generate datasets or contain benchmark-specific logic.
+A SPARQL HTTP server adapter controls one query server that receives SPARQL queries over HTTP. `SparqlHttpSystemAdapter` applies the shared server lifecycle to `fuseki/tdb2`, `virtuoso/default`, and `qlever/default`. Each system requires the `rdf/source` representation. Concrete adapters provide preparation, startup, readiness, shutdown, and collection operations. The shared foundation accepts the workload execution function, passes the endpoint to it, validates operation results, and performs best-effort shutdown and collection after a failure. It does not generate datasets or contain benchmark-specific logic.
 
 #### Fuseki lifecycle adapter
 
-`FusekiSystemAdapter` connects `fuseki/default` to the stock `Fuseki` class. It verifies the single N-Triples source file during preparation. It reuses stock startup, readiness, RDF loading, endpoint, shutdown, database cleanup, logging, and executor collection. It adds no second container or SPARQL client implementation.
+`FusekiSystemAdapter` connects `fuseki/tdb2` to the stock `Fuseki` class. It verifies the single N-Triples source file during preparation. It reuses stock startup, readiness, RDF loading, endpoint, shutdown, database cleanup, logging, and executor collection. It adds no second container or SPARQL client implementation.
 
 #### Virtuoso lifecycle adapter
 
@@ -471,7 +471,7 @@ KROWN pins `qlever/default` to the official QLever 0.6.0 image digest. The local
 
 ### Fuseki 6.2.0 container
 
-KROWN pins `fuseki/default` to Apache Jena Fuseki 6.2.0. The Docker build uses Java 21 and verifies the official release archive with SHA-512. The repository no longer stores an unpacked Jena distribution. Docker Compose remains an optional manual development path. The KROWN executor continues to own the experiment lifecycle.
+KROWN pins `fuseki/tdb2` to Apache Jena Fuseki 6.2.0. The Docker build uses Java 21 and verifies the official release archive with SHA-512. The repository no longer stores an unpacked Jena distribution. Docker Compose remains an optional manual development path. The KROWN executor continues to own the experiment lifecycle.
 
 
 ### Virtuoso 7.2.17 container
@@ -608,7 +608,7 @@ python execution-framework/run_rdf_experiment_matrix.py \
   --scenario /path/to/scenario \
   --declaration /path/to/experiment.json \
   --manifest manifests/workload.json \
-  --system fuseki/default \
+  --system fuseki/tdb2 \
   --system qlever/default \
   --results raw/summary.json \
   --output raw/results.tar.gz \

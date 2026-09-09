@@ -251,7 +251,7 @@ def _runtime_preflight(
         image = supplied.get("image") or configuration.parameters.get("image")
         if isinstance(image, str):
             images.add(_require_concrete_runtime_value(image, f"{system_id}.image"))
-        if system_id == "fuseki/default":
+        if system_id in {"fuseki/memory", "fuseki/tdb2"}:
             images.add("kgconstruct/fuseki:v6.2.0")
             ports.add(3030)
         elif system_id == "virtuoso/default":

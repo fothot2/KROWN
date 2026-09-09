@@ -21,7 +21,12 @@ from bench_executor.container import Container
 from bench_executor.logger import Logger
 
 VERSION = '6.2.0'
-CMD_ARGS = '--tdb2 --update --loc /fuseki/databases/DB /ds'
+MEMORY_MODE = 'memory'
+TDB2_MODE = 'tdb2'
+_MODE_COMMANDS = {
+    MEMORY_MODE: '--mem --update /ds',
+    TDB2_MODE: '--tdb2 --update --loc /fuseki/databases/DB /ds',
+}
 DATABASE_CONTAINER_PATH = '/fuseki/databases/DB'
 READY_ENDPOINT = 'http://localhost:3030/ds/query'
 READY_TIMEOUT_SECONDS = 120
@@ -33,7 +38,7 @@ READY_QUERY = 'ASK { }'
 class Fuseki(Container):
     """Fuseki container for executing SPARQL queries."""
     def __init__(self, data_path: str, config_path: str, directory: str,
-                 verbose: bool):
+                 verbose: bool, dataset_mode: str = TDB2_MODE):
         """Creates an instance of the Fuseki class.
 
         Parameters
@@ -50,6 +55,10 @@ class Fuseki(Container):
         self._data_path = os.path.abspath(data_path)
         self._config_path = os.path.abspath(config_path)
         self._logger = Logger(__name__, directory, verbose)
+        if dataset_mode not in _MODE_COMMANDS:
+            raise ValueError(f'Unsupported Fuseki dataset mode: {dataset_mode}')
+        self._dataset_mode = dataset_mode
+        self.command_arguments = _MODE_COMMANDS[dataset_mode]
 
         os.umask(0)
         os.makedirs(os.path.join(self._data_path, 'fuseki'), exist_ok=True)
@@ -57,15 +66,18 @@ class Fuseki(Container):
         # Set Java heap to 1/2 of available memory instead of the default 1/4
         max_heap = int(psutil.virtual_memory().total * (1/2))
 
-        super().__init__(f'kgconstruct/fuseki:v{VERSION}', 'Fuseki',
-                         self._logger,
+        volumes = [f'{self._data_path}/shared:/data']
+        if dataset_mode == TDB2_MODE:
+            volumes.append(
+                f'{self._data_path}/fuseki:/fuseki/databases/DB'
+            )
+        self._volumes = tuple(volumes)
+        super().__init__(f'kgconstruct/fuseki:v{VERSION}',
+                         f'Fuseki-{dataset_mode}', self._logger,
                          ports={'3030': '3030'},
                          environment={
                              'JAVA_OPTIONS': f'-Xmx{max_heap} -Xms{max_heap}'
-                         },
-                         volumes=[f'{self._data_path}/shared:/data',
-                                  f'{self._data_path}/fuseki:'
-                                  '/fuseki/databases/DB'])
+                         }, volumes=volumes)
         self._endpoint = 'http://localhost:3030/ds/sparql'
 
     @staticmethod
@@ -193,7 +205,7 @@ class Fuseki(Container):
 
     def wait_until_ready(self, command: str = '') -> bool:
         """Start Fuseki and wait for a successful bounded HTTP probe."""
-        command = f'{command} {CMD_ARGS}'
+        command = f'{command} {self.command_arguments}'
         if not self.run(command):
             self._logger.error(f'Command "{command}" failed')
             return False
@@ -259,11 +271,12 @@ class Fuseki(Container):
         """Stop Fuseki and preserve the measured TDB2 representation."""
         if not super().stop():
             return False
-        if not self.cleanup_data(self._data_path):
-            self._logger.error(
-                'Failed to restore host ownership of the Fuseki database'
-            )
-            return False
+        if getattr(self, '_dataset_mode', TDB2_MODE) == TDB2_MODE:
+            if not self.cleanup_data(self._data_path):
+                self._logger.error(
+                    'Failed to restore host ownership of the Fuseki database'
+                )
+                return False
         return True
 
     @property

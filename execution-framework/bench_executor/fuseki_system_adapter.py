@@ -11,17 +11,18 @@ from bench_executor.database_build_metrics import (
     measure_persistent_paths,
 )
 from bench_executor.experiment_matrix_contract import DatasetArtifact
-from bench_executor.fuseki import Fuseki
+from bench_executor.fuseki import Fuseki, MEMORY_MODE, TDB2_MODE
 from bench_executor.sparql_http_system_adapter import (
     SparqlHttpSystemAdapter,
     sparql_http_system_specifications,
 )
 
 
-def _fuseki_specification():
+def _fuseki_specification(dataset_mode: str):
+    system_id = f'fuseki/{dataset_mode}'
     return next(
         specification for specification in sparql_http_system_specifications()
-        if specification.system_id == 'fuseki/default'
+        if specification.system_id == system_id
     )
 
 
@@ -37,8 +38,12 @@ class FusekiSystemAdapter(SparqlHttpSystemAdapter):
     """Apply the generic lifecycle without duplicating Fuseki behavior."""
 
     def __init__(self, artifact: DatasetArtifact, data_path: str,
-                 config_path: str, directory: str, verbose: bool = False):
-        super().__init__(_fuseki_specification(), artifact)
+                 config_path: str, directory: str, verbose: bool = False,
+                 dataset_mode: str = TDB2_MODE):
+        if dataset_mode not in {MEMORY_MODE, TDB2_MODE}:
+            raise ValueError(f'Unsupported Fuseki dataset mode: {dataset_mode}')
+        super().__init__(_fuseki_specification(dataset_mode), artifact)
+        self._dataset_mode = dataset_mode
         if artifact.source_format != 'ntriples':
             raise ValueError('Fuseki rdf/source artifact must use ntriples')
         if len(artifact.files) != 1:
@@ -51,10 +56,16 @@ class FusekiSystemAdapter(SparqlHttpSystemAdapter):
         self._fuseki: Fuseki | None = None
         self.build_metrics = None
         self.representation_size = None
+        self.load_metrics = None
 
     @property
     def memory_container(self) -> str:
-        return 'Fuseki'
+        dataset_mode = getattr(self, '_dataset_mode', TDB2_MODE)
+        if dataset_mode not in {MEMORY_MODE, TDB2_MODE}:
+            raise ValueError(
+                f'Unsupported Fuseki dataset mode: {dataset_mode}'
+            )
+        return f'Fuseki-{dataset_mode}'
 
     @property
     def endpoint(self) -> str:
@@ -77,15 +88,16 @@ class FusekiSystemAdapter(SparqlHttpSystemAdapter):
             return False
         self._fuseki = Fuseki(
             str(self._data_path), str(self._config_path),
-            str(self._directory), self._verbose,
+            str(self._directory), self._verbose, self._dataset_mode,
         )
         return True
 
     def start(self) -> bool:
         if self._fuseki is None:
             return False
-        if not self._fuseki.reset_store():
-            return False
+        if self._dataset_mode == TDB2_MODE:
+            if not self._fuseki.reset_store():
+                return False
         return self._fuseki.wait_until_ready()
 
     def ready(self) -> bool:
@@ -97,19 +109,33 @@ class FusekiSystemAdapter(SparqlHttpSystemAdapter):
         succeeded = self._fuseki.load(self._rdf_file.path)
         elapsed_ns = time.perf_counter_ns() - started_ns
         memory = self.memory_sampler.snapshot()
-        self.build_metrics = build_metrics_from_phase(
-            elapsed_ns,
-            memory,
-            'artifact_open_or_load',
+        self.load_metrics = build_metrics_from_phase(
+            elapsed_ns, memory, 'artifact_open_or_load',
             status='ok' if succeeded else 'failed',
             returncode=0 if succeeded else None,
         )
+        if self._dataset_mode == MEMORY_MODE:
+            self.build_metrics = {
+                'schema': 'rdf-database-build-metrics-v1',
+                'boundary': 'not-applicable',
+                'reason': 'transient-in-memory-dataset',
+            }
+            self.representation_size = {
+                'schema': 'rdf-database-representation-size-v1',
+                'boundary': 'not-applicable',
+                'reason': 'transient-in-memory-dataset',
+                'logical_bytes': None,
+                'allocated_bytes': None,
+            }
+        else:
+            self.build_metrics = self.load_metrics
         if not succeeded:
             return False
-        self.representation_size = measure_persistent_paths(
-            [self._data_path / 'fuseki'],
-            excluded_names=['tdb.lock', 'journal.jrnl'],
-        )
+        if self._dataset_mode == TDB2_MODE:
+            self.representation_size = measure_persistent_paths(
+                [self._data_path / 'fuseki'],
+                excluded_names=['tdb.lock', 'journal.jrnl'],
+            )
         return True
 
     def stop(self) -> bool:

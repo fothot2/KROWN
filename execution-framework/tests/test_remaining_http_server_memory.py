@@ -7,6 +7,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from bench_executor.fuseki import TDB2_MODE
 from bench_executor.fuseki_system_adapter import FusekiSystemAdapter
 from bench_executor.qlever_system_adapter import QLeverSystemAdapter
 from bench_executor.virtuoso_system_adapter import VirtuosoSystemAdapter
@@ -15,7 +16,8 @@ from bench_executor.virtuoso_system_adapter import VirtuosoSystemAdapter
 class RemainingHttpServerMemoryTests(unittest.TestCase):
     def test_fuseki_uses_only_the_query_server_container(self):
         adapter = FusekiSystemAdapter.__new__(FusekiSystemAdapter)
-        self.assertEqual(adapter.memory_container, 'Fuseki')
+        adapter._dataset_mode = TDB2_MODE
+        self.assertEqual(adapter.memory_container, 'Fuseki-tdb2')
 
     def test_virtuoso_uses_only_the_query_server_container(self):
         adapter = VirtuosoSystemAdapter.__new__(VirtuosoSystemAdapter)

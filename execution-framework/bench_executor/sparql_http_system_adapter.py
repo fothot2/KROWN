@@ -21,7 +21,8 @@ from bench_executor.system_adapter_contract import (
 
 _REQUIRED_REPRESENTATION = 'rdf/source'
 _SYSTEM_ADAPTERS = {
-    'fuseki/default': 'bench_executor.fuseki_system_adapter:FusekiSystemAdapter',
+    'fuseki/memory': 'bench_executor.fuseki_system_adapter:FusekiSystemAdapter',
+    'fuseki/tdb2': 'bench_executor.fuseki_system_adapter:FusekiSystemAdapter',
     'virtuoso/default': 'bench_executor.virtuoso_system_adapter:VirtuosoSystemAdapter',
     'qlever/default': 'bench_executor.qlever_system_adapter:QLeverSystemAdapter',
     'oxigraph/memory': 'bench_executor.oxigraph_system_adapter:OxigraphSystemAdapter',
@@ -34,11 +35,16 @@ def sparql_http_system_specifications() -> tuple[SystemAdapterSpecification, ...
     specifications = []
     for system_id, adapter in _SYSTEM_ADAPTERS.items():
         system, configuration = system_id.split('/', 1)
+        configuration_parameters = (
+            {'dataset_mode': configuration}
+            if system == 'fuseki' else {}
+        )
         system_configuration = SystemConfiguration(
             system=system,
             configuration=configuration,
             kind='server',
             representation=_REQUIRED_REPRESENTATION,
+            parameters=configuration_parameters,
         )
         specifications.append(SystemAdapterSpecification(
             configuration=system_configuration,
