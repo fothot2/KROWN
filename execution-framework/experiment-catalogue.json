@@ -1,0 +1,254 @@
+{
+  "schema": "krown-experiment-catalogue-v1",
+  "catalogue_id": "supervisor-frozen-platform-2026-09-09",
+  "scope": {
+    "blocking_benchmarks": [
+      "bsbm",
+      "krown-synthetic",
+      "dbbench"
+    ],
+    "deferred_benchmarks": [
+      "watdiv",
+      "wdbench",
+      "sparqloscope-qlever"
+    ],
+    "deferred_systems": [
+      "rete/default"
+    ],
+    "dataset_scales": {
+      "bsbm": [
+        "10k",
+        "100k"
+      ],
+      "first_execution": "bsbm/10k"
+    }
+  },
+  "required_metrics": [
+    "query_time",
+    "query_peak_ram",
+    "cold_load_or_parse_time",
+    "warm_load_or_parse_time",
+    "build_time",
+    "build_peak_ram",
+    "persistent_representation_size",
+    "result_correctness",
+    "failure_classification"
+  ],
+  "required_outputs": [
+    "json",
+    "csv",
+    "markdown",
+    "xlsx"
+  ],
+  "oom_rule": "confirmed-process-memory-exhaustion-only",
+  "setups": [
+    {
+      "id": "cottas-rdflib-disk",
+      "system_id": "pycottas/default",
+      "required": true,
+      "engine": "rdflib",
+      "representation": "cottas/default",
+      "storage_mode": "file-backed",
+      "execution_interface": "rdflib-plugin",
+      "formats": [
+        "nt",
+        "nq"
+      ],
+      "notes": "COTTAS plus RDFLib, disk-based."
+    },
+    {
+      "id": "vortex-reference-file",
+      "system_id": "vortex-rdf/dictionary-secondary-by-reference",
+      "required": true,
+      "engine": "rdflib",
+      "representation": "vortex-rdf/dictionary-secondary-by-reference",
+      "storage_mode": "file-backed",
+      "execution_interface": "rdflib-plugin",
+      "formats": [
+        "nt",
+        "nq"
+      ],
+      "notes": "Vortex by reference, file-backed."
+    },
+    {
+      "id": "vortex-reference-memory",
+      "system_id": "vortex-rdf/dictionary-secondary-by-reference-memory",
+      "required": true,
+      "engine": "rdflib",
+      "representation": "vortex-rdf/dictionary-secondary-by-reference",
+      "storage_mode": "in-memory",
+      "execution_interface": "rdflib-plugin",
+      "formats": [
+        "nt",
+        "nq"
+      ],
+      "notes": "Must prove whether memory and file modes are identical."
+    },
+    {
+      "id": "vortex-copy-file",
+      "system_id": "vortex-rdf/dictionary-secondary-by-copy",
+      "required": true,
+      "engine": "rdflib",
+      "representation": "vortex-rdf/dictionary-secondary-by-copy",
+      "storage_mode": "file-backed",
+      "execution_interface": "rdflib-plugin",
+      "formats": [
+        "nt",
+        "nq"
+      ],
+      "notes": "Vortex by copy, file-backed."
+    },
+    {
+      "id": "vortex-copy-memory",
+      "system_id": "vortex-rdf/dictionary-secondary-by-copy-memory",
+      "required": true,
+      "engine": "rdflib",
+      "representation": "vortex-rdf/dictionary-secondary-by-copy",
+      "storage_mode": "in-memory",
+      "execution_interface": "rdflib-plugin",
+      "formats": [
+        "nt",
+        "nq"
+      ],
+      "notes": "Must prove whether memory and file modes are identical."
+    },
+    {
+      "id": "hdt-rdflib-memory",
+      "system_id": "hdt-rdflib/default",
+      "required": true,
+      "engine": "rdflib",
+      "representation": "hdt/default",
+      "storage_mode": "in-memory",
+      "execution_interface": "rdflib-plugin",
+      "formats": [
+        "nt"
+      ],
+      "notes": "HDT does not support N-Quads in this setup."
+    },
+    {
+      "id": "comunica-hdt-file",
+      "system_id": "comunica/hdt",
+      "required": false,
+      "engine": "comunica",
+      "representation": "hdt/default",
+      "storage_mode": "file-backed",
+      "execution_interface": "persistent-jsonl",
+      "formats": [
+        "nt"
+      ],
+      "notes": "Keep as an optional HDT comparison."
+    },
+    {
+      "id": "oxigraph-native-memory",
+      "system_id": "oxigraph/memory",
+      "required": true,
+      "engine": "oxigraph-rust",
+      "representation": "rdf/source",
+      "storage_mode": "in-memory",
+      "execution_interface": "sparql-http",
+      "formats": [
+        "nt",
+        "nq"
+      ],
+      "notes": "Native Rust best case."
+    },
+    {
+      "id": "oxigraph-native-rocksdb",
+      "system_id": "oxigraph/rocksdb",
+      "required": true,
+      "engine": "oxigraph-rust",
+      "representation": "oxigraph/rocksdb",
+      "storage_mode": "persistent-database",
+      "execution_interface": "sparql-http",
+      "formats": [
+        "nt",
+        "nq"
+      ],
+      "notes": "Native Rust RocksDB."
+    },
+    {
+      "id": "pyoxigraph-rdflib-memory",
+      "system_id": "pyoxigraph-rdflib/memory",
+      "required": true,
+      "engine": "rdflib",
+      "representation": "rdf/source",
+      "storage_mode": "in-memory",
+      "execution_interface": "rdflib-plugin",
+      "formats": [
+        "nt",
+        "nq"
+      ],
+      "notes": "Wrapper comparison with Vortex plus RDFLib."
+    },
+    {
+      "id": "rdflib-native-file",
+      "system_id": "rdflib/default",
+      "required": true,
+      "engine": "rdflib",
+      "representation": "rdf/source",
+      "storage_mode": "file-backed",
+      "execution_interface": "native-rdflib",
+      "formats": [
+        "nt",
+        "nq"
+      ],
+      "notes": "Plain RDFLib baseline. No hidden plugin or index."
+    },
+    {
+      "id": "fuseki-memory",
+      "system_id": "fuseki/memory",
+      "required": true,
+      "engine": "fuseki-arq",
+      "representation": "rdf/source",
+      "storage_mode": "in-memory",
+      "execution_interface": "sparql-http",
+      "formats": [
+        "nt",
+        "nq"
+      ],
+      "notes": "Transient in-memory dataset. Persistent size is not applicable."
+    },
+    {
+      "id": "fuseki-tdb2",
+      "system_id": "fuseki/tdb2",
+      "required": true,
+      "engine": "fuseki-arq",
+      "representation": "fuseki/tdb2",
+      "storage_mode": "persistent-database",
+      "execution_interface": "sparql-http",
+      "formats": [
+        "nt",
+        "nq"
+      ],
+      "notes": "Persistent TDB2 mode."
+    },
+    {
+      "id": "qlever-disk",
+      "system_id": "qlever/default",
+      "required": true,
+      "engine": "qlever",
+      "representation": "qlever/index",
+      "storage_mode": "persistent-database",
+      "execution_interface": "sparql-http",
+      "formats": [
+        "nt",
+        "nq"
+      ],
+      "notes": "Full BSBM integration and index size are required."
+    },
+    {
+      "id": "virtuoso-disk",
+      "system_id": "virtuoso/default",
+      "required": true,
+      "engine": "virtuoso",
+      "representation": "virtuoso/database",
+      "storage_mode": "persistent-database",
+      "execution_interface": "sparql-http",
+      "formats": [
+        "nt",
+        "nq"
+      ],
+      "notes": "Persistent Virtuoso database."
+    }
+  ]
+}
