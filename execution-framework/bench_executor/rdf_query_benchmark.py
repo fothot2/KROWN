@@ -283,6 +283,7 @@ class _RdfQueryBenchmark:
             progress_stream=None,
             manual_skip_rules=(),
             automatic_quarantine_rules=(),
+            probe_rules=(),
             force_include: bool = False):
         if not callable(adapter_factory):
             raise TypeError('adapter_factory must be callable')
@@ -329,7 +330,17 @@ class _RdfQueryBenchmark:
         self._force_include = force_include
         self._manual_skip_rules = tuple(manual_skip_rules)
         self._automatic_quarantine_rules = tuple(automatic_quarantine_rules)
+        self._probe_rules = tuple(probe_rules)
         self.last_lifecycle_timing: dict[str, Any] | None = None
+
+    def _probe_rule(self, query):
+        if self._force_include:
+            return None
+        for rule in self._probe_rules:
+            value=query.metadata.get(rule["selector_kind"])
+            if value is not None and str(value)==rule["selector_value"]:
+                return rule
+        return None
 
     def _manual_skip_rule(self, query):
         if self._force_include:
@@ -566,7 +577,10 @@ class _RdfQueryBenchmark:
                     record = self._base_record(
                         query, phase, run, order, phase_seed
                     )
-                    manual_skip_rule = self._manual_skip_rule(query)
+                    probe_rule = self._probe_rule(query)
+                    if probe_rule is not None:
+                        record.update({"quarantine_probe": True,"probe_policy_id":probe_rule["policy_id"],"probe_policy_sha256":probe_rule["policy_sha256"],"probe_decision_sha256":probe_rule["probe_decision_sha256"],"probe_reason":probe_rule["reason"],"probe_ordinal":probe_rule["ordinal"],"probe_source_snapshot_sha256":probe_rule["source_snapshot_sha256"]})
+                    manual_skip_rule = None if probe_rule is not None else self._manual_skip_rule(query)
                     if manual_skip_rule is not None:
                         record.update({
                             'status': 'skipped',
@@ -586,7 +600,7 @@ class _RdfQueryBenchmark:
                         })
                         records.append(record)
                         continue
-                    automatic_rule = self._automatic_quarantine_rule(query)
+                    automatic_rule = None if probe_rule is not None else self._automatic_quarantine_rule(query)
                     if automatic_rule is not None:
                         record.update({
                             'status': 'skipped', 'elapsed_ns': 0,

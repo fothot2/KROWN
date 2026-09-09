@@ -33,6 +33,7 @@ from bench_executor.rdf_query_benchmark import (
 )
 from bench_executor.rdflib_query_benchmark import RdfLibQueryBenchmark
 from bench_executor.query_quarantine_resolver import validate_snapshot
+from bench_executor.query_quarantine_probe import select_probe_rules, validate_probe_policy
 from bench_executor.persistent_jsonl_query_adapter import PersistentJsonlQueryAdapter
 from bench_executor.sparql_http_benchmark import SparqlHttpBenchmark
 from bench_executor.sparql_result import normalize_sparql_json_result
@@ -542,6 +543,7 @@ def _run_file_backed(
     system_id: str,
     force_include: bool = False,
     automatic_quarantine_rules=(),
+    probe_rules=(),
 ) -> bool:
     manifest = _load_query_manifest(str(manifest_path))
     policy = experiment.execution_policy
@@ -559,6 +561,7 @@ def _run_file_backed(
         measured_runs=int(policy["measured_runs"]),
         manual_skip_rules=_manual_skip_rules(policy, manifest, system_id),
         automatic_quarantine_rules=automatic_quarantine_rules,
+        probe_rules=probe_rules,
         force_include=force_include,
     )
     benchmark.run(str(output_path))
@@ -618,6 +621,9 @@ def _compact_result_record(record: Mapping[str, Any]) -> dict[str, Any]:
         "skip_decision_sha256",
         "skip_evidence_count",
         "skip_timeout_count",
+        "quarantine_probe", "probe_policy_id", "probe_policy_sha256",
+        "probe_decision_sha256", "probe_reason", "probe_ordinal",
+        "probe_source_snapshot_sha256",
     ):
         if name in record:
             compact[name] = record[name]
@@ -787,6 +793,7 @@ def _result_summary(path: Path, experiment, representation: str) -> dict[str, An
         row.get("skip_kind") == "automatic-query-flavour-quarantine"
         for row in records
     )
+    quarantine_probes = sum(row.get("quarantine_probe") is True for row in records)
     return {
         "system": experiment.system_configuration,
         "representation": representation,
@@ -797,6 +804,7 @@ def _result_summary(path: Path, experiment, representation: str) -> dict[str, An
         "skipped_count": skipped,
         "manual_skipped_count": manual_skipped,
         "automatic_quarantine_skipped_count": automatic_skipped,
+        "quarantine_probe_count": quarantine_probes,
         "workload_timing": _attempt_timing_summary(records),
         "result_file": path.name,
     }
@@ -886,6 +894,9 @@ class RdfExperimentMatrixResource:
         failure_output_file: str | None = None,
         force_include: bool = False,
         quarantine_snapshot_file: str | None = None,
+        quarantine_probe_policy: Mapping[str, Any] | None = None,
+        completed_compatible_runs: int = 0,
+        matrix_run_id: str = "run-0",
     ) -> bool:
         """Execute selected declaration bindings and publish summary plus archive."""
         self.last_outcome = "success"
@@ -979,6 +990,11 @@ class RdfExperimentMatrixResource:
                 automatic_rules = _automatic_quarantine_rules(
                     quarantine_snapshot_path, manifest, system_id
                 )
+                probe_rules = ()
+                if quarantine_probe_policy is not None and quarantine_snapshot_path is not None:
+                    snapshot_value = json.loads(quarantine_snapshot_path.read_text(encoding="utf-8"))
+                    validate_probe_policy(quarantine_probe_policy)
+                    probe_rules = select_probe_rules(snapshot_value, quarantine_probe_policy, completed_compatible_runs, matrix_run_id, system_id)
                 strategy = _execution_strategy(specification)
                 if strategy == "sparql-http":
                     arguments = _constructor_arguments(
@@ -1015,6 +1031,9 @@ class RdfExperimentMatrixResource:
                                 adapter, "query_request_max_rows", None
                             ),
                             memory_sampler=adapter.memory_sampler,
+                            manual_skip_rules=_manual_skip_rules(policy, manifest, system_id),
+                            automatic_quarantine_rules=automatic_rules, probe_rules=probe_rules,
+                            force_include=force_include,
                         )
                     )
                     query_lifecycle = benchmark.last_lifecycle_timing
@@ -1087,6 +1106,7 @@ class RdfExperimentMatrixResource:
                             policy, _load_query_manifest(str(manifest_path)), system_id
                         ),
                         "automatic_quarantine_rules": automatic_rules,
+                        "probe_rules": probe_rules,
                         "force_include": force_include,
                     }
                     if "vortex_layout" in specification.parameters:
@@ -1128,6 +1148,7 @@ class RdfExperimentMatrixResource:
                         system_id,
                         force_include=force_include,
                         automatic_quarantine_rules=automatic_rules,
+                        probe_rules=probe_rules,
                     )
                     query_stages = query_lifecycle["stages_ns"]
                     resource_metrics = query_lifecycle["resource_metrics"]

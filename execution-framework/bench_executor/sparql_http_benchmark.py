@@ -270,7 +270,9 @@ class SparqlHttpBenchmark:
                 request_max_rows: int | None = None,
                 skip_after_warmup_timeout: bool = True,
                 skip_after_warmup_error: bool = True,
-                memory_sampler=None) -> bool:
+                memory_sampler=None, manual_skip_rules=(),
+                automatic_quarantine_rules=(), probe_rules=(),
+                force_include: bool = False) -> bool:
         """Execute the workload and write canonical JSON Lines records."""
         try:
             manifest_path = self._shared_path(manifest_file, output=False)
@@ -301,6 +303,9 @@ class SparqlHttpBenchmark:
                 lifecycle=lifecycle,
                 skip_after_warmup_timeout=skip_after_warmup_timeout,
                 skip_after_warmup_error=skip_after_warmup_error,
+                manual_skip_rules=manual_skip_rules,
+                automatic_quarantine_rules=automatic_quarantine_rules,
+                probe_rules=probe_rules, force_include=force_include,
             )
             records = benchmark.run(output_path)
             self.last_lifecycle_timing = benchmark.last_lifecycle_timing
