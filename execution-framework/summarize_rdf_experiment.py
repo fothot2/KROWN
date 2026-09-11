@@ -5,8 +5,10 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
 import statistics
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -103,7 +105,20 @@ def build_report(summary: Mapping[str, Any]) -> dict[str, Any]:
         measured = _phase(workload, "measured")
         measured_count = _number(measured.get("attempt_count", 0), "measured.attempt_count")
         measured_total = _number(measured.get("attempt_total_ns", 0), "measured.attempt_total_ns")
+        successful_count = _number(
+            measured.get("successful_attempt_count", measured_count if experiment.get("failure_count", 0) == 0 else 0),
+            "measured.successful_attempt_count",
+        )
+        successful_total = _number(
+            measured.get("successful_attempt_total_ns", measured_total if experiment.get("failure_count", 0) == 0 else 0),
+            "measured.successful_attempt_total_ns",
+        )
         metrics = experiment.get("resource_metrics") or {}
+        outcomes = experiment.get("outcome_counts") or {}
+        build = experiment.get("build_metrics") or {}
+        build_memory = build.get("memory") or {}
+        representation_size = experiment.get("representation_size") or {}
+        orchestration = experiment.get("runtime_orchestration") or {}
         memory = _phase_memory(
             experiment.get("phase_memory_metrics"),
             f"experiment {index}.phase_memory_metrics",
@@ -117,12 +132,25 @@ def build_report(summary: Mapping[str, Any]) -> dict[str, Any]:
             "status": experiment.get("status"),
             "record_count": experiment.get("record_count"),
             "failure_count": experiment.get("failure_count"),
+            "completed_count": outcomes.get("completed", experiment.get("success_count")),
+            "timeout_count": outcomes.get("timeout"),
+            "skipped_count": outcomes.get("skipped", experiment.get("skipped_count")),
+            "engine_error_count": outcomes.get("engine-error"),
+            "semantic_mismatch_count": outcomes.get("semantic-mismatch"),
+            "confirmed_oom_count": outcomes.get("confirmed-oom"),
             "storage": mode.get("storage"),
             "process_temperature": mode.get("process_temperature"),
             "lifecycle": mode.get("lifecycle"),
             "warmup_total_ms": _milliseconds(warmup.get("attempt_total_ns", 0)),
             "measured_total_ms": _milliseconds(measured_total),
             "measured_attempt_count": measured_count,
+            "successful_attempt_count": successful_count,
+            "successful_query_total_ms": _milliseconds(successful_total),
+            "successful_query_mean_ms": (
+                None if successful_count == 0
+                else round(successful_total / successful_count / 1_000_000, 3)
+            ),
+            "measured_total_ms": _milliseconds(measured_total),
             "measured_mean_ms": (
                 None if measured_count == 0
                 else round(measured_total / measured_count / 1_000_000, 3)
@@ -139,6 +167,18 @@ def build_report(summary: Mapping[str, Any]) -> dict[str, Any]:
             "restart_load_or_parse_ms": _milliseconds(
                 load_temperature.get("restart_load_or_parse_ns")
             ),
+            "load_temperature_semantics": load_temperature.get("semantics"),
+            "build_status": build.get("status"),
+            "build_time_ms": _milliseconds(build.get("elapsed_ns")),
+            "build_peak_rss_mib": _mebibytes(build_memory.get("peak_rss_bytes")),
+            "representation_logical_bytes": representation_size.get("logical_bytes"),
+            "representation_allocated_bytes": representation_size.get("allocated_bytes"),
+            "representation_size_boundary": representation_size.get("boundary"),
+            "matrix_run_id": orchestration.get("matrix_run_id"),
+            "probe_policy_id": orchestration.get("probe_policy_id"),
+            "probe_policy_sha256": orchestration.get("probe_policy_sha256"),
+            "quarantine_snapshot_sha256": orchestration.get("quarantine_snapshot_sha256"),
+            "result_file": experiment.get("result_file"),
             "startup_ms": _milliseconds(stages.get("engine_startup", 0)),
             "shutdown_ms": _milliseconds(stages.get("engine_shutdown", 0)),
             "validation_ms": _milliseconds(stages.get("validation", 0)),
@@ -186,14 +226,80 @@ def build_report(summary: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+
+def _atomic_write(path: Path, writer) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, name = tempfile.mkstemp(prefix=f'.{path.name}.', suffix='.tmp', dir=path.parent)
+    os.close(descriptor)
+    temporary = Path(name)
+    try:
+        writer(temporary)
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def write_json(path: Path, report: Mapping[str, Any]) -> None:
+    _atomic_write(path, lambda target: target.write_text(
+        json.dumps(report, indent=2, sort_keys=True, allow_nan=False) + "\n", encoding="utf-8"
+    ))
+
+
 def write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
-    if not rows:
-        path.write_text("", encoding="utf-8")
-        return
-    with path.open("w", encoding="utf-8", newline="") as stream:
-        writer = csv.DictWriter(stream, fieldnames=list(rows[0]))
-        writer.writeheader()
-        writer.writerows(rows)
+    def emit(target: Path) -> None:
+        if not rows:
+            target.write_text("", encoding="utf-8")
+            return
+        with target.open("w", encoding="utf-8", newline="") as stream:
+            writer = csv.DictWriter(stream, fieldnames=list(rows[0]))
+            writer.writeheader(); writer.writerows(rows)
+    _atomic_write(path, emit)
+
+
+def write_markdown(path: Path, report: Mapping[str, Any]) -> None:
+    rows = report["experiments"]
+    columns = ["system", "representation", "status", "successful_attempt_count",
+               "timeout_count", "skipped_count", "engine_error_count",
+               "semantic_mismatch_count", "confirmed_oom_count",
+               "successful_query_total_ms", "measured_peak_rss_mib",
+               "process_cold_load_or_parse_ms", "process_warm_load_or_parse_ms",
+               "build_time_ms", "build_peak_rss_mib", "representation_logical_bytes"]
+    def cell(value: Any) -> str:
+        if value is None: return "not measured"
+        return str(value).replace("|", "\\|").replace("\n", " ")
+    lines = ["# RDF experiment report", "", f"Status: **{cell(report.get('status'))}**", "",
+             "| " + " | ".join(columns) + " |", "| " + " | ".join("---" for _ in columns) + " |"]
+    lines.extend("| " + " | ".join(cell(row.get(name)) for name in columns) + " |" for row in rows)
+    lines.extend(["", "Timeouts, errors, semantic mismatches, and confirmed OOM outcomes are not converted to successful query times.", ""])
+    _atomic_write(path, lambda target: target.write_text("\n".join(lines), encoding="utf-8"))
+
+
+def write_xlsx(path: Path, report: Mapping[str, Any]) -> None:
+    try:
+        from openpyxl import Workbook
+        from openpyxl.styles import Alignment, Font, PatternFill
+        from openpyxl.utils import get_column_letter
+    except ImportError as error:
+        raise RuntimeError("XLSX output requires openpyxl; install execution-framework/requirements.txt") from error
+    rows = report["experiments"]
+    def emit(target: Path) -> None:
+        workbook = Workbook(); sheet = workbook.active; sheet.title = "Experiment summary"
+        headers = list(rows[0]) if rows else ["status"]
+        sheet.append(headers)
+        for row in rows: sheet.append([row.get(name) for name in headers])
+        fill=PatternFill("solid", fgColor="1F4E78")
+        for cell in sheet[1]:
+            cell.font=Font(bold=True,color="FFFFFF"); cell.fill=fill; cell.alignment=Alignment(wrap_text=True)
+        sheet.freeze_panes="A2"; sheet.auto_filter.ref=sheet.dimensions
+        for index,name in enumerate(headers,1):
+            width=max(len(str(name)),*(len(str(row.get(name,''))) for row in rows)) if rows else len(name)
+            sheet.column_dimensions[get_column_letter(index)].width=min(max(width+2,12),48)
+        meta=workbook.create_sheet("Metadata")
+        meta.append(["field","value"]); meta.append(["schema",report.get("schema")]); meta.append(["status",report.get("status")]); meta.append(["experiment_count",report.get("experiment_count")])
+        for cell in meta[1]: cell.font=Font(bold=True,color="FFFFFF"); cell.fill=fill
+        meta.column_dimensions["A"].width=24; meta.column_dimensions["B"].width=48
+        workbook.save(target)
+    _atomic_write(path, emit)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -201,17 +307,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("summary", type=Path)
     parser.add_argument("--json", dest="json_path", type=Path)
     parser.add_argument("--csv", dest="csv_path", type=Path)
+    parser.add_argument("--markdown", dest="markdown_path", type=Path)
+    parser.add_argument("--xlsx", dest="xlsx_path", type=Path)
     args = parser.parse_args(argv)
     report = build_report(json.loads(args.summary.read_text(encoding="utf-8")))
-    if args.json_path:
-        args.json_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
-    if args.csv_path:
-        write_csv(args.csv_path, report["experiments"])
-    if not args.json_path and not args.csv_path:
-        json.dump(report, sys.stdout, indent=2)
-        sys.stdout.write("\n")
+    if args.json_path: write_json(args.json_path, report)
+    if args.csv_path: write_csv(args.csv_path, report["experiments"])
+    if args.markdown_path: write_markdown(args.markdown_path, report)
+    if args.xlsx_path: write_xlsx(args.xlsx_path, report)
+    if not any((args.json_path,args.csv_path,args.markdown_path,args.xlsx_path)):
+        json.dump(report, sys.stdout, indent=2); sys.stdout.write("\n")
     return 0
 
-
-if __name__ == "__main__":
-    raise SystemExit(main())
+if __name__ == "__main__": raise SystemExit(main())

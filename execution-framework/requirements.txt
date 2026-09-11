@@ -5,3 +5,4 @@ psutil
 requests
 rdflib
 timeout-decorator
+openpyxl>=3.1,<4
