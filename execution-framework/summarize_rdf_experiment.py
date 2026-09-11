@@ -142,7 +142,6 @@ def build_report(summary: Mapping[str, Any]) -> dict[str, Any]:
             "process_temperature": mode.get("process_temperature"),
             "lifecycle": mode.get("lifecycle"),
             "warmup_total_ms": _milliseconds(warmup.get("attempt_total_ns", 0)),
-            "measured_total_ms": _milliseconds(measured_total),
             "measured_attempt_count": measured_count,
             "successful_attempt_count": successful_count,
             "successful_query_total_ms": _milliseconds(successful_total),
