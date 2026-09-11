@@ -9,6 +9,8 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
+from bench_executor.outcome_contract import normalize_query_record
+
 SCHEMA_VERSION = 1
 QUERY_STATUSES = frozenset({
     'ok',
@@ -86,7 +88,7 @@ def validate_query_record(record: Mapping[str, Any]) -> dict[str, Any]:
     if missing:
         raise ValueError(f'Missing required fields: {", ".join(missing)}')
 
-    validated = dict(record)
+    validated = normalize_query_record(record)
 
     for field in _STRING_FIELDS:
         value = validated[field]

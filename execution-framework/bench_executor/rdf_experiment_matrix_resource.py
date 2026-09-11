@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from bench_executor.benchmark_result import write_query_records_atomic
+from bench_executor.outcome_contract import outcome_counts
 from bench_executor.experiment_matrix_contract import ArtifactFile, DatasetArtifact
 from bench_executor.logger import Logger
 from bench_executor.rdf_experiment_manifest import (
@@ -845,6 +846,7 @@ def _result_summary(path: Path, experiment, representation: str) -> dict[str, An
         "manual_skipped_count": manual_skipped,
         "automatic_quarantine_skipped_count": automatic_skipped,
         "quarantine_probe_count": quarantine_probes,
+        "outcome_counts": outcome_counts(records),
         "workload_timing": _attempt_timing_summary(records),
         "result_file": path.name,
     }
