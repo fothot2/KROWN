@@ -37,6 +37,8 @@ class CatalogueTests(unittest.TestCase):
   value=self.catalogue()
   with patch("bench_executor.experiment_catalogue.system_adapter_specifications",lambda:[Spec(item["system_id"]) for item in value["setups"]]):audit=build_coverage_audit(value)
   with tempfile.TemporaryDirectory() as d:
+   from openpyxl import load_workbook
    root=Path(d);write_audit_outputs(audit,root)
-   for name in ("coverage-audit.json","coverage-audit.csv","coverage-audit.md","coverage-audit-xlsx-rows.json"):self.assertTrue((root/name).is_file())
+   for name in ("coverage-audit.json","coverage-audit.csv","coverage-audit.md","coverage-audit.xlsx"):self.assertTrue((root/name).is_file())
+   self.assertEqual(load_workbook(root/"coverage-audit.xlsx",read_only=True).sheetnames,["System metric coverage","Readiness"])
 if __name__=="__main__":unittest.main()

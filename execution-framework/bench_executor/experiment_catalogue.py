@@ -7,6 +7,10 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill
+from openpyxl.utils import get_column_letter
+
 from bench_executor.rdf_experiment_manifest import system_adapter_specifications
 
 CATALOGUE_SCHEMA = "krown-experiment-catalogue-v1"
@@ -96,5 +100,31 @@ def write_audit_outputs(audit: Mapping[str,Any], output_root: Path) -> None:
     lines.extend(["","## Blocking cells",""])
     lines.extend([f"- `{row['setup_id']}`: `{row['metric']}` = `{row['status']}`" for row in audit["blocking_cells"]] or ["- None"])
     (root/"coverage-audit.md").write_text("\n".join(lines)+"\n")
-    # Excel-ready JSON rows are explicit until the report XLSX writer lands in Patch 6G.
-    (root/"coverage-audit-xlsx-rows.json").write_text(json.dumps({"sheet":"System metric coverage","columns":["setup_id","system_id","required","storage_mode","metric","status"],"rows":audit["rows"]},indent=2)+"\n")
+    workbook = Workbook()
+    coverage = workbook.active
+    coverage.title = "System metric coverage"
+    columns = ["setup_id", "system_id", "required", "storage_mode", "metric", "status"]
+    coverage.append(columns)
+    for row in audit["rows"]:
+        coverage.append([row[name] for name in columns])
+    readiness = workbook.create_sheet("Readiness")
+    readiness.append(["field", "value"])
+    readiness.append(["catalogue_id", audit["catalogue_id"]])
+    readiness.append(["missing_required_system_count", len(audit["missing_required_system_ids"])])
+    readiness.append(["blocking_metric_cell_count", len(audit["blocking_cells"])])
+    readiness.append(["ready_for_bsbm_10k", audit["ready_for_bsbm_10k"]])
+    fill = PatternFill("solid", fgColor="1F4E78")
+    for sheet in (coverage, readiness):
+        for cell in sheet[1]:
+            cell.font = Font(bold=True, color="FFFFFF")
+            cell.fill = fill
+        sheet.freeze_panes = "A2"
+        sheet.auto_filter.ref = sheet.dimensions
+        for index, name in enumerate([cell.value for cell in sheet[1]], 1):
+            sheet.column_dimensions[get_column_letter(index)].width = min(max(len(str(name)) + 2, 14), 42)
+    temporary_xlsx = root / ".coverage-audit.xlsx.tmp"
+    try:
+        workbook.save(temporary_xlsx)
+        temporary_xlsx.replace(root / "coverage-audit.xlsx")
+    finally:
+        temporary_xlsx.unlink(missing_ok=True)
