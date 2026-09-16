@@ -2,8 +2,10 @@
 """Run RDF query workloads with one system-independent protocol."""
 
 import dataclasses
+import hashlib
 import json
 import random
+import re
 import resource
 import sys
 import time
@@ -20,6 +22,20 @@ from bench_executor.resource_memory_sampler import PhaseAwareMemorySampler
 
 MANIFEST_SCHEMA_VERSION = 1
 LIFECYCLE_MODES = frozenset({'shared', 'per_attempt'})
+_BSBM_TEMPLATE_QUERY_ID = re.compile(r'(?:^|/)query-(\d+)$', re.IGNORECASE)
+
+
+def _bsbm_template_id(query) -> str | None:
+    """Return one normalized BSBM template ID for policy selection."""
+    value = query.metadata.get('bsbm_template_id')
+    if value is not None:
+        value = str(value).strip()
+        if value:
+            if value.isdigit():
+                return str(int(value))
+            return value
+    match = _BSBM_TEMPLATE_QUERY_ID.search(query.query_id)
+    return str(int(match.group(1))) if match is not None else None
 
 
 class _QueryTimeoutError(TimeoutError):
@@ -284,7 +300,8 @@ class _RdfQueryBenchmark:
             manual_skip_rules=(),
             automatic_quarantine_rules=(),
             probe_rules=(),
-            force_include: bool = False):
+            force_include: bool = False,
+            in_run_timeout_quarantine_threshold: int = 0):
         if not callable(adapter_factory):
             raise TypeError('adapter_factory must be callable')
         for name, value in (
@@ -331,6 +348,15 @@ class _RdfQueryBenchmark:
         self._manual_skip_rules = tuple(manual_skip_rules)
         self._automatic_quarantine_rules = tuple(automatic_quarantine_rules)
         self._probe_rules = tuple(probe_rules)
+        if (not isinstance(in_run_timeout_quarantine_threshold, int)
+                or isinstance(in_run_timeout_quarantine_threshold, bool)
+                or in_run_timeout_quarantine_threshold < 0):
+            raise ValueError(
+                'in_run_timeout_quarantine_threshold must be a non-negative integer'
+            )
+        self._in_run_timeout_quarantine_threshold = (
+            in_run_timeout_quarantine_threshold
+        )
         self.last_lifecycle_timing: dict[str, Any] | None = None
 
     def _probe_rule(self, query):
@@ -573,10 +599,40 @@ class _RdfQueryBenchmark:
 
             total_attempts = len(attempts)
             failure_count = 0
+            in_run_timeout_counts: dict[str, int] = {}
+            in_run_quarantined: dict[str, dict[str, Any]] = {}
             for ordinal, (phase, run, order, query, phase_seed) in enumerate(attempts, 1):
                     record = self._base_record(
                         query, phase, run, order, phase_seed
                     )
+                    template_id = _bsbm_template_id(query)
+                    dynamic_rule = (
+                        None if self._force_include or template_id is None
+                        else in_run_quarantined.get(template_id)
+                    )
+                    if dynamic_rule is not None:
+                        record.update({
+                            'status': 'skipped',
+                            'elapsed_ns': 0,
+                            'client_elapsed_ns': 0,
+                            'attempt_elapsed_ns': 0,
+                            'timing_clock': 'perf_counter_ns',
+                            'timing_schema': 'rdf-attempt-timing-v1',
+                            'timing_stages_ns': {'dispatch': 0},
+                            'timing_stages_sum_ns': 0,
+                            'timing_reconciled': True,
+                            'measurement_boundary': 'query-skipped-before-adapter-dispatch',
+                            'skip_kind': 'in-run-template-timeout-quarantine',
+                            'skip_reason': dynamic_rule['reason'],
+                            'skip_policy_id': dynamic_rule['policy_id'],
+                            'skip_policy_sha256': dynamic_rule['policy_sha256'],
+                            'skip_template_id': template_id,
+                            'skip_timeout_count': dynamic_rule['timeout_count'],
+                            'skip_threshold': dynamic_rule['threshold'],
+                            'skip_activated_at_attempt': dynamic_rule['activated_at_attempt'],
+                        })
+                        records.append(record)
+                        continue
                     probe_rule = self._probe_rule(query)
                     if probe_rule is not None:
                         record.update({"quarantine_probe": True,"probe_policy_id":probe_rule["policy_id"],"probe_policy_sha256":probe_rule["policy_sha256"],"probe_decision_sha256":probe_rule["probe_decision_sha256"],"probe_reason":probe_rule["reason"],"probe_ordinal":probe_rule["ordinal"],"probe_source_snapshot_sha256":probe_rule["source_snapshot_sha256"]})
@@ -678,6 +734,33 @@ class _RdfQueryBenchmark:
                         failure_count, record.get('client_elapsed_ns', record.get('elapsed_ns')),
                     )
                     records.append(record)
+                    if (
+                        record['status'] == 'timeout'
+                        and template_id is not None
+                        and self._in_run_timeout_quarantine_threshold > 0
+                        and not self._force_include
+                    ):
+                        timeout_count = in_run_timeout_counts.get(template_id, 0) + 1
+                        in_run_timeout_counts[template_id] = timeout_count
+                        threshold = self._in_run_timeout_quarantine_threshold
+                        if timeout_count >= threshold and template_id not in in_run_quarantined:
+                            policy_id = 'bsbm-100k-in-run-template-timeout-quarantine-v1'
+                            canonical = (
+                                f'{policy_id}|{self._system}|{template_id}|{threshold}'
+                            )
+                            in_run_quarantined[template_id] = {
+                                'policy_id': policy_id,
+                                'policy_sha256': hashlib.sha256(
+                                    canonical.encode('utf-8')
+                                ).hexdigest(),
+                                'reason': (
+                                    f'template reached {threshold} query timeouts '
+                                    f'in the current system execution'
+                                ),
+                                'timeout_count': timeout_count,
+                                'threshold': threshold,
+                                'activated_at_attempt': ordinal,
+                            }
 
                     if phase == 'warmup':
                         status = record['status']
