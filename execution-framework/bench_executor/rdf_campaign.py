@@ -19,7 +19,8 @@ from typing import Callable, Mapping, Sequence
 SCHEMA = "rdf-campaign-specification-v2"
 SAFE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 REPORTABLE = frozenset({"completed", "completed-with-failures"})
-FAILED = frozenset({"structural-failure", "timed-out", "interrupted"})
+FAILED = frozenset({"structural-failure", "timed-out", "interrupted", "infrastructure-blocked"})
+MATRIX_CONTAINER_PREFIXES = ("Fuseki", "Virtuoso", "QLever", "qlever_", "Oxigraph-")
 
 
 def now() -> str:
@@ -79,6 +80,32 @@ def _positive(value: int, field: str) -> int:
     if not isinstance(value, int) or isinstance(value, bool) or value < 1:
         raise ValueError(f"{field} must be positive")
     return value
+
+
+def matrix_owned_containers() -> tuple[str, ...]:
+    """Return running containers with names reserved by RDF matrix adapters."""
+    result = subprocess.run(
+        ["docker", "ps", "--format", "{{.Names}}"],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError("cannot inspect running Docker containers")
+    return tuple(sorted(
+        name for name in result.stdout.splitlines()
+        if name.startswith(MATRIX_CONTAINER_PREFIXES)
+    ))
+
+
+def require_clean_matrix_environment(stage: str) -> None:
+    """Reject infrastructure contamination without deleting foreign state."""
+    containers = matrix_owned_containers()
+    if containers:
+        raise RuntimeError(
+            f"matrix infrastructure is blocked during {stage}: "
+            + ", ".join(containers)
+        )
 
 
 def declaration_systems(path: str | Path) -> tuple[str, ...]:
@@ -261,7 +288,16 @@ class RdfCampaign:
                     stdout=stream, stderr=subprocess.STDOUT, timeout=self.spec.system_limit_s, check=False,
                 )
             exit_code = result.returncode
-            success = exit_code == 0 and (shared_raw / "summary.json").is_file() and (shared_raw / "results.tar.gz").is_file()
+            remaining_containers = matrix_owned_containers()
+            if remaining_containers:
+                status = "infrastructure-blocked"
+                detail = (
+                    "matrix-owned containers remain after system execution: "
+                    + ", ".join(remaining_containers)
+                )
+                success = False
+            else:
+                success = exit_code == 0 and (shared_raw / "summary.json").is_file() and (shared_raw / "results.tar.gz").is_file()
             if success:
                 retain(shared_raw / "summary.json", root / "summary.json")
                 retain(shared_raw / "results.tar.gz", root / "results.tar.gz")
@@ -276,7 +312,8 @@ class RdfCampaign:
                     status = "structural-failure"
                     detail = "report generation failed"
             else:
-                detail = "matrix process failed or did not publish its success bundle"
+                if detail is None:
+                    detail = "matrix process failed or did not publish its success bundle"
                 for name in ("failed-summary.json", "failed-results.tar.gz"):
                     if (shared_raw / name).is_file():
                         retain(shared_raw / name, root / name)
@@ -290,6 +327,22 @@ class RdfCampaign:
         atomic_json(hashes_path, self._hashes(root))
         atomic_json(state_path, row)
         return row
+
+
+    @staticmethod
+    def _outcome_counts(rows: Sequence[Mapping[str, object]]) -> dict[str, int]:
+        """Count terminal campaign outcomes without changing query semantics."""
+        return {
+            "reportable_count": sum(row.get("state") in REPORTABLE for row in rows),
+            "structural_failure_count": sum(
+                row.get("state") == "structural-failure" for row in rows
+            ),
+            "timed_out_count": sum(row.get("state") == "timed-out" for row in rows),
+            "interrupted_count": sum(row.get("state") == "interrupted" for row in rows),
+            "infrastructure_blocked_count": sum(
+                row.get("state") == "infrastructure-blocked" for row in rows
+            ),
+        }
 
     def _inter_run(self, campaign_root: Path, systems: Sequence[str], outcomes: Sequence[Mapping[str, object]], environment: Mapping[str, str]) -> dict[str, object]:
         result = {"state": "not-run"}
@@ -331,40 +384,131 @@ class RdfCampaign:
             if plan_path.exists():
                 previous = json.loads(plan_path.read_text())
                 if {key: previous[key] for key in identity} != identity:
-                    raise RuntimeError("resume differs from immutable campaign plan or its input hashes")
+                    raise RuntimeError(
+                        "resume differs from immutable campaign plan or its input hashes"
+                    )
             else:
                 atomic_json(plan_path, {**identity, "created_at_utc": now()})
+
+            try:
+                require_clean_matrix_environment("campaign preflight")
+            except RuntimeError as error:
+                final = {
+                    "campaign_id": campaign_id,
+                    "expected_repetitions": self.spec.repetitions,
+                    "completed_repetitions": 0,
+                    "reportable_repetitions": 0,
+                    "systems": list(systems),
+                    "outcomes": [],
+                    "inter_run": {"state": "not-run"},
+                    "execution_complete": False,
+                    "all_systems_reportable": False,
+                    "complete": False,
+                    "reportable_count": 0,
+                    "structural_failure_count": 0,
+                    "timed_out_count": 0,
+                    "interrupted_count": 0,
+                    "infrastructure_blocked_count": 1,
+                    "state": "infrastructure-blocked",
+                    "detail": str(error),
+                    "finished_at_utc": now(),
+                }
+                atomic_json(campaign_root / "final-summary.json", final)
+                append_jsonl(campaign_root / "campaign-ledger.jsonl", final)
+                return final
+
             environment = os.environ.copy()
-            environment.setdefault("RUST_LOG", "vortex_rdf_cli=debug,vortex_rdf_core=debug")
+            environment.setdefault(
+                "RUST_LOG",
+                "vortex_rdf_cli=debug,vortex_rdf_core=debug",
+            )
             environment["PYTHONUNBUFFERED"] = "1"
             outcomes = []
+            interrupted = False
+            infrastructure_blocked = False
             for repetition in range(1, self.spec.repetitions + 1):
                 run_id = f"{campaign_id}-r{repetition:02d}"
                 run_root = self.executions / run_id
                 run_root.mkdir(parents=True, exist_ok=True)
                 rows = []
                 for system in systems:
-                    row = self._run_system(run_root, run_id, system, environment, retry_failed)
+                    row = self._run_system(
+                        run_root,
+                        run_id,
+                        system,
+                        environment,
+                        retry_failed,
+                    )
                     rows.append(row)
                     append_jsonl(run_root / "ledger.jsonl", row)
-                    if row["state"] not in REPORTABLE:
+                    if row["state"] in {"interrupted", "infrastructure-blocked"}:
+                        interrupted = row["state"] == "interrupted"
+                        infrastructure_blocked = row["state"] == "infrastructure-blocked"
                         break
-                complete = len(rows) == len(systems) and all(row["state"] in REPORTABLE for row in rows)
-                final = {"run_id": run_id, "repetition": repetition, "systems": rows, "complete": complete, "finished_at_utc": now()}
+
+                terminal_complete = (
+                    len(rows) == len(systems)
+                    and all(row["state"] in REPORTABLE | FAILED for row in rows)
+                )
+                all_reportable = (
+                    terminal_complete
+                    and all(row["state"] in REPORTABLE for row in rows)
+                )
+                counts = self._outcome_counts(rows)
+                final = {
+                    "run_id": run_id,
+                    "repetition": repetition,
+                    "systems": rows,
+                    "execution_complete": terminal_complete,
+                    "all_systems_reportable": all_reportable,
+                    "complete": terminal_complete,
+                    **counts,
+                    "finished_at_utc": now(),
+                }
                 atomic_json(run_root / "final-summary.json", final)
                 outcomes.append(final)
                 append_jsonl(campaign_root / "campaign-ledger.jsonl", final)
-                if not complete:
+                if interrupted or infrastructure_blocked:
                     break
-            complete = len(outcomes) == self.spec.repetitions and all(outcome["complete"] for outcome in outcomes)
-            inter_run = self._inter_run(campaign_root, systems, outcomes, environment) if complete else {"state": "not-run"}
-            if inter_run.get("state") == "failed":
-                complete = False
+
+            execution_complete = (
+                len(outcomes) == self.spec.repetitions
+                and all(outcome["execution_complete"] for outcome in outcomes)
+            )
+            all_systems_reportable = (
+                execution_complete
+                and all(outcome["all_systems_reportable"] for outcome in outcomes)
+            )
+            inter_run = (
+                self._inter_run(campaign_root, systems, outcomes, environment)
+                if execution_complete
+                else {"state": "not-run"}
+            )
+            rows = [
+                row
+                for outcome in outcomes
+                for row in outcome["systems"]
+            ]
+            counts = self._outcome_counts(rows)
             final = {
-                "campaign_id": campaign_id, "expected_repetitions": self.spec.repetitions,
-                "completed_repetitions": sum(bool(outcome["complete"]) for outcome in outcomes),
-                "systems": list(systems), "outcomes": outcomes, "inter_run": inter_run,
-                "complete": complete, "finished_at_utc": now(),
+                "campaign_id": campaign_id,
+                "expected_repetitions": self.spec.repetitions,
+                "completed_repetitions": sum(
+                    bool(outcome["execution_complete"])
+                    for outcome in outcomes
+                ),
+                "reportable_repetitions": sum(
+                    bool(outcome["all_systems_reportable"])
+                    for outcome in outcomes
+                ),
+                "systems": list(systems),
+                "outcomes": outcomes,
+                "inter_run": inter_run,
+                "execution_complete": execution_complete,
+                "all_systems_reportable": all_systems_reportable,
+                "complete": execution_complete,
+                **counts,
+                "finished_at_utc": now(),
             }
             atomic_json(campaign_root / "final-summary.json", final)
             return final

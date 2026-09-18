@@ -582,13 +582,51 @@ class _RdfQueryBenchmark:
                     shared_adapter.open()
                     process_cold_open_ns = time.perf_counter_ns() - open_started_ns
 
-            if self._manifest.schedule is not None:
-                phase_field = self._manifest.schedule['phase_field']
-                attempts = [
-                    (query.metadata[phase_field], 0, order, query,
-                     self._seed + order)
-                    for order, query in enumerate(self._manifest.queries)
-                ]
+            schedule = self._manifest.schedule
+            stream_metadata_count = sum(
+                'stream_phase' in query.metadata
+                or 'stream_position' in query.metadata
+                for query in self._manifest.queries
+            )
+            preexpanded = schedule is not None or stream_metadata_count > 0
+            if preexpanded:
+                if stream_metadata_count not in {0, len(self._manifest.queries)}:
+                    raise ValueError(
+                        'pre-expanded stream metadata must be present on every query'
+                    )
+                phase_field = (
+                    schedule['phase_field']
+                    if schedule is not None
+                    else 'stream_phase'
+                )
+                attempts = []
+                for order, query in enumerate(self._manifest.queries):
+                    if phase_field not in query.metadata:
+                        raise ValueError(
+                            f'pre-expanded query misses phase field: {phase_field}'
+                        )
+                    phase = query.metadata[phase_field]
+                    if phase not in {'warmup', 'measured'}:
+                        raise ValueError(
+                            f'unsupported pre-expanded stream phase: {phase}'
+                        )
+                    if 'stream_position' not in query.metadata:
+                        raise ValueError(
+                            'pre-expanded query misses stream_position'
+                        )
+                    position = query.metadata['stream_position']
+                    if not isinstance(position, int) or isinstance(position, bool):
+                        raise ValueError(
+                            'pre-expanded stream_position must be an integer'
+                        )
+                    if position != order:
+                        raise ValueError(
+                            'pre-expanded stream positions must be contiguous '
+                            f'from zero: expected {order}, found {position}'
+                        )
+                    attempts.append(
+                        (phase, 0, order, query, self._seed + order)
+                    )
             else:
                 attempts = []
                 phases: Sequence[tuple[str, int]] = (
@@ -742,7 +780,8 @@ class _RdfQueryBenchmark:
                     )
                     records.append(record)
                     if (
-                        record['status'] == 'timeout'
+                        phase == 'measured'
+                        and record['status'] == 'timeout'
                         and template_id is not None
                         and self._in_run_timeout_quarantine_threshold > 0
                         and not self._force_include
