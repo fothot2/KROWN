@@ -153,6 +153,7 @@ def _runtime_preflight(
     adapter_option_env: Mapping[str, Mapping[str, str]] | None = None,
     environment: Mapping[str, str] | None = None,
     selected_systems: list[str] | tuple[str, ...] | None = None,
+    benchmark_root: Path | None = None,
 ) -> dict[str, Any]:
     """Build and validate a complete plan without starting query systems."""
     if not declaration_path.is_file():
@@ -162,9 +163,17 @@ def _runtime_preflight(
     if not manifest_path.is_file():
         raise FileNotFoundError(f"query manifest is missing: {manifest_path}")
     _load_query_manifest(str(manifest_path))
-    experiments, artifacts = load_rdf_experiment_declaration(declaration_path)
-    declared_systems = [item.system_configuration for item in experiments]
-    experiments = _selected_experiments(experiments, selected_systems)
+    declaration_value = json.loads(declaration_path.read_text(encoding="utf-8"))
+    experiments, artifacts = load_rdf_experiment_declaration(
+        declaration_path, benchmark_root=benchmark_root,
+        selected_systems=selected_systems,
+    )
+    bindings = declaration_value.get("bindings")
+    declared_systems = (
+        [item["system"] for item in bindings]
+        if isinstance(bindings, list)
+        else [item.system_configuration for item in experiments]
+    )
     specifications = {item.system_id: item for item in system_adapter_specifications()}
     options = (
         {}
@@ -342,11 +351,17 @@ def _atomic_json(path: Path, value: Mapping[str, Any]) -> None:
 
 
 def _stage_artifacts(
-    declaration_path: Path, artifacts: Mapping[str, DatasetArtifact], shared: Path
+    declaration_path: Path, artifacts: Mapping[str, DatasetArtifact], shared: Path,
+    benchmark_root: Path | None = None,
 ) -> dict[str, DatasetArtifact]:
     """Verify and hard-link or copy declared files into data/shared."""
     declaration = json.loads(declaration_path.read_text(encoding="utf-8"))
-    benchmark_root = declaration_path.parents[1]
+    benchmark_root = (
+        declaration_path.parents[1] if benchmark_root is None
+        else benchmark_root.expanduser().resolve()
+    )
+    if not benchmark_root.is_dir():
+        raise FileNotFoundError(f"benchmark root is missing: {benchmark_root}")
     staged: dict[str, DatasetArtifact] = {}
     stage_root = shared / "rdf-matrix-artifacts"
     stage_root.mkdir(parents=True, exist_ok=True)
@@ -921,6 +936,7 @@ class RdfExperimentMatrixResource:
         adapter_option_env: Mapping[str, Mapping[str, str]] | None = None,
         selected_systems: list[str] | None = None,
         selected_systems_env: str | None = None,
+        benchmark_root: str | None = None,
     ) -> bool:
         """Publish a dry runtime plan without starting any query system."""
         temporary = None
@@ -943,6 +959,7 @@ class RdfExperimentMatrixResource:
                 adapter_options,
                 adapter_option_env,
                 selected_systems=selection,
+                benchmark_root=(Path(benchmark_root) if benchmark_root else None),
             )
             output_path = resolve_shared_path(str(self._shared), output_file, "Output")
             temporary = temporary_output(output_path)
@@ -978,6 +995,7 @@ class RdfExperimentMatrixResource:
         quarantine_probe_policy_file: str | None = None,
         completed_compatible_runs: int | None = None,
         matrix_run_id: str | None = None,
+        benchmark_root: str | None = None,
     ) -> bool:
         """Execute selected declaration bindings and publish summary plus archive."""
         self.last_outcome = "success"
@@ -1022,15 +1040,17 @@ class RdfExperimentMatrixResource:
                 adapter_options,
                 adapter_option_env,
                 selected_systems=selection,
+                benchmark_root=(Path(benchmark_root) if benchmark_root else None),
             )
             preflight_ns = time.perf_counter_ns() - preflight_started_ns
             experiments, original_artifacts = load_rdf_experiment_declaration(
-                declaration_path
+                declaration_path, benchmark_root=benchmark_root,
+                selected_systems=selection,
             )
-            experiments = _selected_experiments(experiments, selection)
             artifact_started_ns = time.perf_counter_ns()
             artifacts = _stage_artifacts(
-                declaration_path, original_artifacts, self._shared
+                declaration_path, original_artifacts, self._shared,
+                benchmark_root=(Path(benchmark_root) if benchmark_root else None),
             )
             artifact_ns = time.perf_counter_ns() - artifact_started_ns
             specifications = {
@@ -1430,4 +1450,15 @@ class RdfExperimentMatrixResource:
             return False
         finally:
             if run_directory is not None:
+                # Remove only the random per-run workspace. The permanent
+                # rdf-matrix-artifacts directory is never assigned here.
+                name = run_directory.name
+                if not name.startswith("rdf-matrix-"):
+                    raise RuntimeError(
+                        f"refusing to remove non-matrix workspace: {run_directory}"
+                    )
+                if name == "rdf-matrix-artifacts":
+                    raise RuntimeError(
+                        "refusing to remove permanent rdf-matrix-artifacts"
+                    )
                 shutil.rmtree(run_directory, ignore_errors=True)

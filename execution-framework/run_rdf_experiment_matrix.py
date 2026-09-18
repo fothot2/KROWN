@@ -51,6 +51,7 @@ def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--scenario", type=Path, required=True)
     parser.add_argument("--declaration", type=Path, required=True)
+    parser.add_argument("--benchmark-root", type=Path)
     parser.add_argument("--manifest", type=_relative_shared_path, required=True)
     parser.add_argument(
         "--system", dest="systems", action="append", required=True,
@@ -99,6 +100,7 @@ def execute_matrix(
     quarantine_probe_policy: str | None = None,
     completed_compatible_runs: int | None = None,
     matrix_run_id: str | None = None,
+    benchmark_root: Path | None = None,
 ) -> bool:
     scenario = scenario.expanduser().resolve()
     declaration = declaration.expanduser().resolve()
@@ -121,6 +123,7 @@ def execute_matrix(
         quarantine_probe_policy_file=quarantine_probe_policy,
         completed_compatible_runs=completed_compatible_runs,
         matrix_run_id=matrix_run_id,
+        benchmark_root=(str(benchmark_root.expanduser().resolve()) if benchmark_root else None),
     )
 
 
@@ -141,6 +144,7 @@ def main(argv: list[str] | None = None) -> int:
         quarantine_probe_policy=arguments.quarantine_probe_policy,
         completed_compatible_runs=arguments.completed_compatible_runs,
         matrix_run_id=arguments.matrix_run_id,
+        benchmark_root=arguments.benchmark_root,
     )
     return 0 if success else 1
 

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import hashlib
+import inspect
 import json
 import sys
 import tempfile
@@ -48,7 +49,7 @@ class RdfExperimentMatrixResourceTests(unittest.TestCase):
             (data/'receipt.json').write_text(json.dumps({'files':[{'path':'artifact.bin'}]}))
             path=experiments/'run.json'; path.write_text(json.dumps({'representations':{'custom/default':'data/receipt.json'}}))
             artifact=DatasetArtifact('sample','tiny','binary',7,'a'*64,'custom/default',(ArtifactFile('artifact.bin',7,digest),))
-            staged=_stage_artifacts(path,{'custom/default':artifact},shared)['custom/default']; target=shared/staged.files[0].path
+            staged=_stage_artifacts(path,{'custom/default':artifact},shared,benchmark_root=root)['custom/default']; target=shared/staged.files[0].path
             self.assertEqual(target.read_bytes(),b'payload'); self.assertTrue(source.is_file())
 
     def test_compact_result_keeps_only_useful_fields(self):
@@ -56,11 +57,22 @@ class RdfExperimentMatrixResourceTests(unittest.TestCase):
             "query_id": "q1", "phase": "measured", "run": 0,
             "status": "ok", "elapsed_ns": 7, "result_count": 2,
             "result_fingerprint": "f", "query_sha256": "x" * 64,
-            "client_elapsed_ns": 9, "result_variables": ["x"],
+            "client_elapsed_ns": 9,
+            "attempt_elapsed_ns": 7,
+            "timing_clock": "perf_counter_ns",
+            "timing_schema": "rdf-attempt-timing-v1",
+            "timing_stages_ns": {"engine_execute": 7},
+            "timing_stages_sum_ns": 7, "timing_reconciled": True,
+            "measurement_boundary": "adapter-execute",
+            "result_variables": ["x"],
         }
         self.assertEqual(set(_compact_result_record(record)), {
             "query_id", "phase", "run", "status", "elapsed_ns",
             "result_count", "result_fingerprint",
+            "client_elapsed_ns", "attempt_elapsed_ns",
+            "timing_clock", "timing_schema",
+            "timing_stages_ns", "timing_stages_sum_ns",
+            "timing_reconciled", "measurement_boundary",
         })
 
     def test_compact_result_keeps_errors_only_on_failure(self):
@@ -68,7 +80,13 @@ class RdfExperimentMatrixResourceTests(unittest.TestCase):
             "query_id": "q1", "phase": "measured", "run": 0,
             "status": "engine_error", "elapsed_ns": 7, "result_count": None,
             "result_fingerprint": None, "error_type": "RuntimeError",
-            "error_message": "failed",
+            "error_message": "failed", "client_elapsed_ns": 7,
+            "attempt_elapsed_ns": 7,
+            "timing_clock": "perf_counter_ns",
+            "timing_schema": "rdf-attempt-timing-v1",
+            "timing_stages_ns": {"engine_execute": 7},
+            "timing_stages_sum_ns": 7, "timing_reconciled": True,
+            "measurement_boundary": "adapter-execute",
         }
         compact = _compact_result_record(record)
         self.assertEqual(compact["error_type"], "RuntimeError")
@@ -76,7 +94,24 @@ class RdfExperimentMatrixResourceTests(unittest.TestCase):
 
     def test_result_summary_reports_failures_and_hash(self):
         with tempfile.TemporaryDirectory() as directory:
-            path=Path(directory)/'results.jsonl'; path.write_text(json.dumps({'status':'ok'})+'\n'+json.dumps({'status':'engine_error'})+'\n')
+            path = Path(directory) / "results.jsonl"
+            records = []
+            for status in ("ok", "engine_error"):
+                records.append({
+                    "status": status, "phase": "measured",
+                    "stream_phase": "measured",
+                    "stream_position": len(records),
+                    "timing_schema": "rdf-attempt-timing-v1",
+                    "timing_clock": "perf_counter_ns",
+                    "attempt_elapsed_ns": 7,
+                    "timing_stages_ns": {"engine_execute": 7},
+                    "timing_stages_sum_ns": 7,
+                    "timing_reconciled": True,
+                })
+            path.write_text(
+                "".join(json.dumps(row) + "\n" for row in records),
+                encoding="utf-8",
+            )
             experiment=SimpleNamespace(experiment_id='sample/run/system',system_configuration='system/default')
             summary=_result_summary(path,experiment,'custom/default')
             self.assertEqual(summary['record_count'],2); self.assertEqual(summary['failure_count'],1); self.assertNotIn('sha256',summary); self.assertNotIn('experiment_id',summary)
@@ -173,6 +208,40 @@ class RdfExperimentMatrixResourceTests(unittest.TestCase):
         worker = (root / "dockers/ComunicaHDT/persistent-worker.js").read_text()
         self.assertIn("function projectedVariables(query)", worker)
         self.assertIn("declaredVariables.length > 0", worker)
+
+    def test_stage_artifacts_accepts_explicit_benchmark_root(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory)/"Suite"; experiments=root/"experiments"; data=root/"data"; shared=Path(directory)/"shared"; experiments.mkdir(parents=True); data.mkdir(); shared.mkdir()
+            payload=b"payload"; (data/"artifact.bin").write_bytes(payload); digest=hashlib.sha256(payload).hexdigest(); (data/"receipt.json").write_text(json.dumps({"files":[{"path":"artifact.bin"}]})); declaration=Path(directory)/"run-local.json"; declaration.write_text(json.dumps({"representations":{"custom/default":"data/receipt.json"}})); artifact=DatasetArtifact("sample","tiny","binary",7,"a"*64,"custom/default",(ArtifactFile("artifact.bin",7,digest),))
+            staged=_stage_artifacts(declaration,{"custom/default":artifact},shared,benchmark_root=root)
+            self.assertEqual((shared/staged["custom/default"].files[0].path).read_bytes(),payload)
+
+    def test_runtime_preflight_keeps_legacy_positional_adapter_arguments(self):
+        signature = inspect.signature(_runtime_preflight)
+        self.assertEqual(
+            list(signature.parameters),
+            [
+                "declaration_path",
+                "manifest_path",
+                "adapter_options",
+                "adapter_option_env",
+                "environment",
+                "selected_systems",
+                "benchmark_root",
+            ],
+        )
+
+    def test_preflight_passes_selection_to_declaration_loader(self):
+        experiment=SimpleNamespace(experiment_id='sample/run/rdflib',system_configuration='rdflib/default')
+        artifact=DatasetArtifact('sample','tiny','ntriples',1,'a'*64,'rdf/source',(ArtifactFile('x.nt',1,'b'*64),))
+        configuration=SystemConfiguration('rdflib','default','embedded','rdf/source')
+        specification=SimpleNamespace(system_id='rdflib/default',configuration=configuration,adapter='bench_executor.rdflib_system_adapter:RdfLibSystemAdapter',parameters={'engine':'default','execution_strategy':'rdflib-worker'})
+        with tempfile.TemporaryDirectory() as directory:
+            declaration=Path(directory)/'declaration.json'; manifest=Path(directory)/'manifest.json'; declaration.write_text('{}'); manifest.write_text(json.dumps({'schema_version':1,'workload':'sample-smoke','dataset':'tiny','query_count':1,'queries':[{'query_id':'q1','query':'ASK { ?s ?p ?o }'}]}))
+            daemon=SimpleNamespace(returncode=0,stdout='"29.1.3"',stderr='')
+            with patch('bench_executor.rdf_experiment_matrix_resource.load_rdf_experiment_declaration',return_value=((experiment,),{'rdf/source':artifact})) as loader, patch('bench_executor.rdf_experiment_matrix_resource.system_adapter_specifications',return_value=(specification,)), patch('bench_executor.rdf_experiment_matrix_resource.shutil.which',return_value='/usr/bin/docker'), patch('bench_executor.rdf_experiment_matrix_resource.subprocess.run',return_value=daemon), patch('bench_executor.rdf_experiment_matrix_resource.importlib.util.find_spec',return_value=object()), patch('bench_executor.rdf_experiment_matrix_resource._docker_image_available',return_value=True), patch('bench_executor.rdf_experiment_matrix_resource._port_available',return_value=True):
+                _runtime_preflight(declaration,manifest,selected_systems=['rdflib/default'])
+        self.assertEqual(loader.call_args.kwargs['selected_systems'],['rdflib/default'])
 
 
 if __name__ == '__main__':

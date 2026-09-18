@@ -1,0 +1,131 @@
+{
+  "dataset": "bsbm-explore-1k",
+  "queries": [
+    {
+      "bsbm_template_id": "1",
+      "query": "PREFIX bsbm-inst: <http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/instances/> PREFIX bsbm: <http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/vocabulary/> PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#> PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> SELECT DISTINCT ?product ?label WHERE {      ?product rdfs:label ?label .     ?product a <http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/instances/ProductType105> .     ?product bsbm:productFeature <http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/instances/ProductFeature815> .      ?product bsbm:productFeature <http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/instances/ProductFeature814> .      ?product bsbm:productPropertyNumeric1 ?value1 .  \tFILTER (?value1 > 486)  \t} ORDER BY ?label LIMIT 10",
+      "query_id": "explore/stream-001250/query-01",
+      "query_sha256": "7a28b14935989acae5d43a09c49d23160ccb727a6dce3d96e01e3ba173c076a1",
+      "stream_phase": "measured",
+      "stream_position": 1250
+    },
+    {
+      "bsbm_template_id": "2",
+      "query": "PREFIX bsbm-inst: <http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/instances/> PREFIX bsbm: <http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/vocabulary/> PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#> PREFIX dc: <http://purl.org/dc/elements/1.1/> SELECT ?label ?comment ?producer ?productFeature ?propertyTextual1 ?propertyTextual2 ?propertyTextual3  ?propertyNumeric1 ?propertyNumeric2 ?propertyTextual4 ?propertyTextual5 ?propertyNumeric4  WHERE {     <http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/instances/dataFromProducer21/Product978> rdfs:label ?label .     <http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/instances/dataFromProducer21/Product978> rdfs:comment ?comment .     <http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/instances/dataFromProducer21/Product978> bsbm:producer ?p .     ?p rdfs:label ?producer .     <http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/instances/dataFromProducer21/Product978> dc:publisher ?p .      <http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/instances/dataFromProducer21/Product978> bsbm:productFeature ?f .     ?f rdfs:label ?productFeature .     <http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/instances/dataFromProducer21/Product978> bsbm:productPropertyTextual1 ?propertyTextual1 .     <http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/instances/dataFromProducer21/Product978> bsbm:productPropertyTextual2 ?propertyTextual2 .     <http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/instances/dataFromProducer21/Product978> bsbm:productPropertyTextual3 ?propertyTextual3 .     <http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/instances/dataFromProducer21/Product978> bsbm:productPropertyNumeric1 ?propertyNumeric1 .     <http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/instances/dataFromProducer21/Product978> bsbm:productPropertyNumeric2 ?propertyNumeric2 .     OPTIONAL { <http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/instances/dataFromProducer21/Product978> bsbm:productPropertyTextual4 ?propertyTextual4 }     OPTIONAL { <http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/instances/dataFromProducer21/Product978> bsbm:productPropertyTextual5 ?propertyTextual5 }     OPTIONAL { <http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/instances/dataFromProducer21/Product978> bsbm:productPropertyNumeric4 ?propertyNumeric4 } }",
+      "query_id": "explore/stream-001251/query-02",
+      "query_sha256": "8fed1f61d47670dcfba9798b30652892bbfc481cdb4db66d7331bd9723b55f56",
+      "stream_phase": "measured",
+      "stream_position": 1251
+    },
+    {
+      "bsbm_template_id": "3",
+      "query": "PREFIX bsbm-inst: <http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/instances/> PREFIX bsbm: <http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/vocabulary/> PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#> PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> SELECT ?product ?label WHERE {     ?product rdfs:label ?label .     ?product a <http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/instances/ProductType82> . \t?product bsbm:productFeature <http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/instances/ProductFeature24> . \t?product bsbm:productPropertyNumeric1 ?p1 . \tFILTER ( ?p1 > 500 )  \t?product bsbm:productPropertyNumeric3 ?p3 . \tFILTER (?p3 < 126 )     OPTIONAL {          ?product bsbm:productFeature <http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/instances/ProductFeature30> .         ?product rdfs:label ?testVar }     FILTER (!bound(?testVar))  } ORDER BY ?label LIMIT 10",
+      "query_id": "explore/stream-001253/query-03",
+      "query_sha256": "b640d29d2634d6d732b5f8480bc41fe95f40be5d1b5e47e7edb793430c678271",
+      "stream_phase": "measured",
+      "stream_position": 1253
+    },
+    {
+      "bsbm_template_id": "4",
+      "query": "PREFIX bsbm-inst: <http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/instances/> PREFIX bsbm: <http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/vocabulary/> PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#> PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> SELECT DISTINCT ?product ?label ?propertyTextual WHERE {     {         ?product rdfs:label ?label .        ?product rdf:type <http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/instances/ProductType60> .        ?product bsbm:productFeature <http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/instances/ProductFeature20> . \t   ?product bsbm:productFeature <http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/instances/ProductFeature214> .        ?product bsbm:productPropertyTextual1 ?propertyTextual . \t   ?product bsbm:productPropertyNumeric1 ?p1 . \t   FILTER ( ?p1 > 114 )     } UNION {        ?product rdfs:label ?label .        ?product rdf:type <http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/instances/ProductType60> .        ?product bsbm:productFeature <http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/instances/ProductFeature20> . \t   ?product bsbm:productFeature <http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/instances/ProductFeature1777> .        ?product bsbm:productPropertyTextual1 ?propertyTextual . \t   ?product bsbm:productPropertyNumeric2 ?p2 . \t   FILTER ( ?p2> 481 )      }  } ORDER BY ?label OFFSET 5 LIMIT 10",
+      "query_id": "explore/stream-001256/query-04",
+      "query_sha256": "4d18c9919fd222cb22a28242f1e001684c457f81d7607507e5e596ba5800ec1c",
+      "stream_phase": "measured",
+      "stream_position": 1256
+    },
+    {
+      "bsbm_template_id": "5",
+      "query": "PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#> PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> PREFIX bsbm: <http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/vocabulary/> SELECT DISTINCT ?product ?productLabel WHERE {  \t?product rdfs:label ?productLabel .     FILTER (<http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/instances/dataFromProducer3/Product94> != ?product) \t<http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/instances/dataFromProducer3/Product94> bsbm:productFeature ?prodFeature . \t?product bsbm:productFeature ?prodFeature . \t<http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/instances/dataFromProducer3/Product94> bsbm:productPropertyNumeric1 ?origProperty1 . \t?product bsbm:productPropertyNumeric1 ?simProperty1 . \tFILTER (?simProperty1 < (?origProperty1 + 120) && ?simProperty1 > (?origProperty1 - 120)) \t<http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/instances/dataFromProducer3/Product94> bsbm:productPropertyNumeric2 ?origProperty2 . \t?product bsbm:productPropertyNumeric2 ?simProperty2 . \tFILTER (?simProperty2 < (?origProperty2 + 170) && ?simProperty2 > (?origProperty2 - 170)) } ORDER BY ?productLabel LIMIT 5",
+      "query_id": "explore/stream-001259/query-05",
+      "query_sha256": "e3a7818762f0e1a294e9830968c7e6db11f61e582b0a7e2b4062e791aa796445",
+      "stream_phase": "measured",
+      "stream_position": 1259
+    },
+    {
+      "bsbm_template_id": "7",
+      "query": "PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#> PREFIX rev: <http://purl.org/stuff/rev#> PREFIX foaf: <http://xmlns.com/foaf/0.1/> PREFIX bsbm: <http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/vocabulary/> PREFIX dc: <http://purl.org/dc/elements/1.1/> SELECT ?productLabel ?offer ?price ?vendor ?vendorTitle ?review ?revTitle         ?reviewer ?revName ?rating1 ?rating2 WHERE {  \t<http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/instances/dataFromProducer17/Product820> rdfs:label ?productLabel .     OPTIONAL {         ?offer bsbm:product <http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/instances/dataFromProducer17/Product820> . \t\t?offer bsbm:price ?price . \t\t?offer bsbm:vendor ?vendor . \t\t?vendor rdfs:label ?vendorTitle .         ?vendor bsbm:country <http://downlode.org/rdf/iso-3166/countries#DE> .         ?offer dc:publisher ?vendor .          ?offer bsbm:validTo ?date .         FILTER (?date > \"2008-06-20T00:00:00\"^^<http://www.w3.org/2001/XMLSchema#dateTime> )     }     OPTIONAL { \t?review bsbm:reviewFor <http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/instances/dataFromProducer17/Product820> . \t?review rev:reviewer ?reviewer . \t?reviewer foaf:name ?revName . \t?review dc:title ?revTitle .     OPTIONAL { ?review bsbm:rating1 ?rating1 . }     OPTIONAL { ?review bsbm:rating2 ?rating2 . }      } }",
+      "query_id": "explore/stream-001260/query-07",
+      "query_sha256": "228a19c22fc395b486444f8f72bd32573f4cab6de2c2df1ab5d5c07b9c7ed9ca",
+      "stream_phase": "measured",
+      "stream_position": 1260
+    },
+    {
+      "bsbm_template_id": "8",
+      "query": "PREFIX bsbm: <http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/vocabulary/> PREFIX dc: <http://purl.org/dc/elements/1.1/> PREFIX rev: <http://purl.org/stuff/rev#> PREFIX foaf: <http://xmlns.com/foaf/0.1/> SELECT ?title ?text ?reviewDate ?reviewer ?reviewerName ?rating1 ?rating2 ?rating3 ?rating4  WHERE {  \t?review bsbm:reviewFor <http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/instances/dataFromProducer21/Product988> . \t?review dc:title ?title . \t?review rev:text ?text . \tFILTER langMatches( lang(?text), \"EN\" )  \t?review bsbm:reviewDate ?reviewDate . \t?review rev:reviewer ?reviewer . \t?reviewer foaf:name ?reviewerName . \tOPTIONAL { ?review bsbm:rating1 ?rating1 . } \tOPTIONAL { ?review bsbm:rating2 ?rating2 . } \tOPTIONAL { ?review bsbm:rating3 ?rating3 . } \tOPTIONAL { ?review bsbm:rating4 ?rating4 . } } ORDER BY DESC(?reviewDate) LIMIT 20",
+      "query_id": "explore/stream-001265/query-08",
+      "query_sha256": "c2902f8f63fc70e2093c6173a33ab7004b863a2a371464dcc5f7353f8492241e",
+      "stream_phase": "measured",
+      "stream_position": 1265
+    },
+    {
+      "bsbm_template_id": "9",
+      "query": "PREFIX rev: <http://purl.org/stuff/rev#> DESCRIBE ?x WHERE { <http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/instances/dataFromRatingSite1/Review5743> rev:reviewer ?x }",
+      "query_id": "explore/stream-001266/query-09",
+      "query_sha256": "e1a0dea43f0650ef25534ae11f740566a0eb4f83c8abee65aba03dca5a0024b7",
+      "stream_phase": "measured",
+      "stream_position": 1266
+    },
+    {
+      "bsbm_template_id": "10",
+      "query": "PREFIX bsbm: <http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/vocabulary/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>  PREFIX dc: <http://purl.org/dc/elements/1.1/> SELECT DISTINCT ?offer ?price WHERE { \t?offer bsbm:product <http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/instances/dataFromProducer11/Product519> . \t?offer bsbm:vendor ?vendor .     ?offer dc:publisher ?vendor . \t?vendor bsbm:country <http://downlode.org/rdf/iso-3166/countries#US> . \t?offer bsbm:deliveryDays ?deliveryDays . \tFILTER (?deliveryDays <= 3) \t?offer bsbm:price ?price .     ?offer bsbm:validTo ?date .     FILTER (?date > \"2008-06-20T00:00:00\"^^<http://www.w3.org/2001/XMLSchema#dateTime> ) } ORDER BY xsd:double(str(?price)) LIMIT 10",
+      "query_id": "explore/stream-001271/query-10",
+      "query_sha256": "8ad2d08bb7e5a050fdf4e28caae3e265cb9c01ae47d78662243d61ec42853d6d",
+      "stream_phase": "measured",
+      "stream_position": 1271
+    },
+    {
+      "bsbm_template_id": "11",
+      "query": "SELECT ?property ?hasValue ?isValueOf WHERE {   { <http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/instances/dataFromVendor9/Offer16018> ?property ?hasValue }   UNION   { ?isValueOf ?property <http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/instances/dataFromVendor9/Offer16018> } }",
+      "query_id": "explore/stream-001273/query-11",
+      "query_sha256": "1bcc83a16759cb12e47b72afd5432c6ca67f18127cbb1292547ed5020f8c7b37",
+      "stream_phase": "measured",
+      "stream_position": 1273
+    },
+    {
+      "bsbm_template_id": "12",
+      "query": "PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#> PREFIX rev: <http://purl.org/stuff/rev#> PREFIX foaf: <http://xmlns.com/foaf/0.1/> PREFIX bsbm: <http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/vocabulary/> PREFIX bsbm-export: <http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/vocabulary/export/> PREFIX dc: <http://purl.org/dc/elements/1.1/> CONSTRUCT {  <http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/instances/dataFromVendor11/Offer17888> bsbm-export:product ?productURI .              <http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/instances/dataFromVendor11/Offer17888> bsbm-export:productlabel ?productlabel .              <http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/instances/dataFromVendor11/Offer17888> bsbm-export:vendor ?vendorname .              <http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/instances/dataFromVendor11/Offer17888> bsbm-export:vendorhomepage ?vendorhomepage .               <http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/instances/dataFromVendor11/Offer17888> bsbm-export:offerURL ?offerURL .              <http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/instances/dataFromVendor11/Offer17888> bsbm-export:price ?price .              <http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/instances/dataFromVendor11/Offer17888> bsbm-export:deliveryDays ?deliveryDays .              <http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/instances/dataFromVendor11/Offer17888> bsbm-export:validuntil ?validTo }  WHERE { <http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/instances/dataFromVendor11/Offer17888> bsbm:product ?productURI .         ?productURI rdfs:label ?productlabel .         <http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/instances/dataFromVendor11/Offer17888> bsbm:vendor ?vendorURI .         ?vendorURI rdfs:label ?vendorname .         ?vendorURI foaf:homepage ?vendorhomepage .         <http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/instances/dataFromVendor11/Offer17888> bsbm:offerWebpage ?offerURL .         <http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/instances/dataFromVendor11/Offer17888> bsbm:price ?price .         <http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/instances/dataFromVendor11/Offer17888> bsbm:deliveryDays ?deliveryDays .         <http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/instances/dataFromVendor11/Offer17888> bsbm:validTo ?validTo }",
+      "query_id": "explore/stream-001274/query-12",
+      "query_sha256": "3e2d7b15c4dece39b25041779e530290edb69278cfbc87c1642488fccc75a199",
+      "stream_phase": "measured",
+      "stream_position": 1274
+    }
+  ],
+  "query_count": 11,
+  "schema_version": 1,
+  "source": {
+    "format": "bsbm-log-csv",
+    "generation_receipt": {
+      "dataset": {
+        "format": "ntriples",
+        "path": "dataset.nt",
+        "sha256": "deb8d48ce5440145a8261fd97acafce6c4fc1cf713447e6ed20d8035442b05df",
+        "size_bytes": 95715671,
+        "triple_count": 374911
+      },
+      "forward_chaining": true,
+      "generator": {
+        "branch": "bench-data",
+        "commit": "da7c78d8c6f4eeb19149b9848c24123a97f31e2f",
+        "dataset_command": "./generate -fc -pc 1000 -s nt -fn dataset-1000",
+        "measured_mix_runs": 500,
+        "query_command": "./testdriver -ucf usecases/explore/sparql.txt http://127.0.0.1:7878/query",
+        "repository": "https://github.com/Tpt/bsbm-tools.git",
+        "seed": 808080,
+        "warmup_mix_runs": 50
+      },
+      "path": "/users/u0182905/benchmarks/BSBM/data/explore-1k/generation-receipt.json",
+      "product_count": 1000,
+      "sha256": "ee80532bc2eea502dcb4e6a403c02aae8401005592788b14a26753c3cc68cdd2",
+      "specification": "3.1"
+    },
+    "kind": "official_query_stream",
+    "measured_records": 12500,
+    "path": "/users/u0182905/benchmarks/BSBM/data/explore-1k/explore.csv",
+    "record_count": 13750,
+    "selection": "smoke",
+    "sha256": "c47c6215a68a496459d6a914c9fd4505bef3c3026cc0ee7c2f96844ea111d3db",
+    "warmup_records": 1250
+  },
+  "source_format": "bsbm-official-query-stream",
+  "workload": "bsbm-explore-smoke"
+}

@@ -3,7 +3,7 @@
 from __future__ import annotations
 import importlib,json
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 from bench_executor.dataset_artifact_receipt import load_dataset_artifact_receipt
 from bench_executor.experiment_matrix_contract import DatasetArtifact,ExperimentSpecification,SystemConfiguration
 from bench_executor.sparql_http_system_adapter import sparql_http_system_specifications
@@ -40,31 +40,139 @@ def _contained(root:Path,value:Any,field:str)->Path:
  try:path.relative_to(root.resolve())
  except ValueError as error:raise ValueError(f"{field} escapes benchmark root") from error
  return path
-def load_rdf_experiment_declaration(path:str|Path)->tuple[tuple[ExperimentSpecification,...],dict[str,DatasetArtifact]]:
- declaration_path=Path(path).expanduser().resolve(); root=declaration_path.parents[1]; value=json.loads(declaration_path.read_text(encoding="utf-8"))
- if not isinstance(value,dict) or value.get("schema")!=SCHEMA: raise ValueError("unsupported RDF experiment declaration")
- required={"schema","experiment","benchmark","dataset","workload","inventory","representations","bindings","execution_policy"}
- optional={"semantic_baseline"}
- fields=set(value)
- if not required.issubset(fields) or fields.difference(required|optional): raise ValueError("RDF experiment declaration has unexpected fields")
- representations=value["representations"]
- if not isinstance(representations,dict) or not representations: raise ValueError("representations must be a non-empty object")
- artifacts={identifier:load_dataset_artifact_receipt(str(_contained(root,receipt,"representation receipt"))) for identifier,receipt in representations.items()}
- if any(identifier!=artifact.representation for identifier,artifact in artifacts.items()): raise ValueError("receipt representation differs from declaration")
- identities={(a.benchmark,a.dataset,a.source_format,a.source_size_bytes,a.source_sha256) for a in artifacts.values()}
- if len(identities)!=1 or next(iter(identities))[:2]!=(value["benchmark"],value["dataset"]): raise ValueError("representations do not share the declared logical source")
- registry={item.system_id:item for item in system_adapter_specifications()}; experiments=[]; seen=set()
- for binding in value["bindings"]:
-  if not isinstance(binding,dict) or set(binding)!={"system","representation"}: raise ValueError("binding has unexpected fields")
-  system_id=binding["system"]; representation=binding["representation"]
-  if system_id in seen: raise ValueError(f"duplicate system binding: {system_id}")
-  if system_id not in registry: raise ValueError(f"unknown system binding: {system_id}")
-  if representation not in artifacts: raise ValueError(f"unknown representation binding: {representation}")
-  artifact=artifacts[representation]
-  if system_id=="hdt-rdflib/optimized-in-memory" and [item.path for item in artifact.files] != ["dataset.hdt","dataset.hdt.index.v1-1"]: raise ValueError("optimized HDT requires dataset.hdt and dataset.hdt.index.v1-1")
-  experiment=ExperimentSpecification(experiment_id=f'{value["experiment"]}/{system_id}',benchmark=value["benchmark"],dataset=value["dataset"],workload=value["workload"],dataset_artifact=artifact.artifact_id,system_configuration=system_id,execution_policy=value["execution_policy"])
-  experiment.validate_bindings(artifact,registry[system_id].configuration); experiments.append(experiment); seen.add(system_id)
- return tuple(experiments),artifacts
+def load_rdf_experiment_declaration(
+    path: str | Path,
+    benchmark_root: str | Path | None = None,
+    selected_systems: Sequence[str] | None = None,
+) -> tuple[tuple[ExperimentSpecification, ...], dict[str, DatasetArtifact]]:
+    declaration_path = Path(path).expanduser().resolve()
+    root = (
+        declaration_path.parents[1]
+        if benchmark_root is None
+        else Path(benchmark_root).expanduser().resolve()
+    )
+    value = json.loads(declaration_path.read_text(encoding="utf-8"))
+    if benchmark_root is not None and not root.is_dir():
+        raise FileNotFoundError(f"benchmark root is missing: {root}")
+    if not isinstance(value, dict) or value.get("schema") != SCHEMA:
+        raise ValueError("unsupported RDF experiment declaration")
+    required = {
+        "schema", "experiment", "benchmark", "dataset", "workload",
+        "inventory", "representations", "bindings", "execution_policy",
+    }
+    optional = {"semantic_baseline"}
+    fields = set(value)
+    if not required.issubset(fields) or fields.difference(required | optional):
+        raise ValueError("RDF experiment declaration has unexpected fields")
+
+    bindings = value["bindings"]
+    if not isinstance(bindings, list) or not bindings:
+        raise ValueError("bindings must be a non-empty array")
+    declared_systems = []
+    seen = set()
+    for binding in bindings:
+        if not isinstance(binding, dict) or set(binding) != {"system", "representation"}:
+            raise ValueError("binding has unexpected fields")
+        system_id = binding["system"]
+        representation = binding["representation"]
+        if not isinstance(system_id, str) or not system_id:
+            raise ValueError("binding system must be a non-empty string")
+        if not isinstance(representation, str) or not representation:
+            raise ValueError("binding representation must be a non-empty string")
+        if system_id in seen:
+            raise ValueError(f"duplicate system binding: {system_id}")
+        seen.add(system_id)
+        declared_systems.append(system_id)
+
+    if selected_systems is None:
+        selected_bindings = bindings
+    else:
+        if not isinstance(selected_systems, (list, tuple)) or not selected_systems:
+            raise ValueError("selected_systems must be a non-empty array")
+        normalized = []
+        for system_id in selected_systems:
+            if not isinstance(system_id, str) or not system_id.strip():
+                raise ValueError("selected_systems entries must be non-empty strings")
+            normalized.append(system_id.strip())
+        if len(normalized) != len(set(normalized)):
+            raise ValueError("selected_systems contains duplicate systems")
+        unknown = sorted(set(normalized).difference(declared_systems))
+        if unknown:
+            raise ValueError(
+                "selected_systems contains unknown systems: " + ", ".join(unknown)
+            )
+        selected = set(normalized)
+        selected_bindings = [
+            binding for binding in bindings if binding["system"] in selected
+        ]
+
+    representations = value["representations"]
+    if not isinstance(representations, dict) or not representations:
+        raise ValueError("representations must be a non-empty object")
+    selected_representations = {
+        binding["representation"] for binding in selected_bindings
+    }
+    unknown_representations = sorted(selected_representations.difference(representations))
+    if unknown_representations:
+        raise ValueError(
+            "unknown representation binding: " + ", ".join(unknown_representations)
+        )
+    artifacts = {
+        identifier: load_dataset_artifact_receipt(
+            str(_contained(root, representations[identifier], "representation receipt"))
+        )
+        for identifier in representations
+        if identifier in selected_representations
+    }
+    if any(
+        identifier != artifact.representation
+        for identifier, artifact in artifacts.items()
+    ):
+        raise ValueError("receipt representation differs from declaration")
+    identities = {
+        (
+            artifact.benchmark,
+            artifact.dataset,
+            artifact.source_format,
+            artifact.source_size_bytes,
+            artifact.source_sha256,
+        )
+        for artifact in artifacts.values()
+    }
+    if (
+        len(identities) != 1
+        or next(iter(identities))[:2] != (value["benchmark"], value["dataset"])
+    ):
+        raise ValueError("representations do not share the declared logical source")
+
+    registry = {item.system_id: item for item in system_adapter_specifications()}
+    experiments = []
+    for binding in selected_bindings:
+        system_id = binding["system"]
+        representation = binding["representation"]
+        if system_id not in registry:
+            raise ValueError(f"unknown system binding: {system_id}")
+        artifact = artifacts[representation]
+        if (
+            system_id == "hdt-rdflib/optimized-in-memory"
+            and [item.path for item in artifact.files]
+            != ["dataset.hdt", "dataset.hdt.index.v1-1"]
+        ):
+            raise ValueError(
+                "optimized HDT requires dataset.hdt and dataset.hdt.index.v1-1"
+            )
+        experiment = ExperimentSpecification(
+            experiment_id=f'{value["experiment"]}/{system_id}',
+            benchmark=value["benchmark"],
+            dataset=value["dataset"],
+            workload=value["workload"],
+            dataset_artifact=artifact.artifact_id,
+            system_configuration=system_id,
+            execution_policy=value["execution_policy"],
+        )
+        experiment.validate_bindings(artifact, registry[system_id].configuration)
+        experiments.append(experiment)
+    return tuple(experiments), artifacts
 def resolve_adapter_classes()->dict[str,type]:
  result={}
  for specification in system_adapter_specifications():
