@@ -601,6 +601,9 @@ def _run_file_backed(
         automatic_quarantine_rules=automatic_quarantine_rules,
         probe_rules=probe_rules,
         force_include=force_include,
+        in_run_timeout_quarantine_threshold=int(
+            os.environ.get('KROWN_IN_RUN_TIMEOUT_QUARANTINE_THRESHOLD', '0')
+        ),
     )
     benchmark.run(str(output_path))
     if not isinstance(benchmark.last_lifecycle_timing, dict):
@@ -659,6 +662,8 @@ def _compact_result_record(record: Mapping[str, Any]) -> dict[str, Any]:
         "skip_decision_sha256",
         "skip_evidence_count",
         "skip_timeout_count",
+        "skip_template_id", "skip_threshold",
+        "skip_activated_at_attempt",
         "quarantine_probe", "probe_policy_id", "probe_policy_sha256",
         "probe_decision_sha256", "probe_reason", "probe_ordinal",
         "probe_source_snapshot_sha256",
@@ -759,6 +764,22 @@ def _remove_published_bundle(summary_path: Path, archive_path: Path) -> None:
     archive_path.unlink(missing_ok=True)
 
 
+def _expected_phase_counts(manifest) -> dict[str, int] | None:
+    """Return phase counts declared by a pre-expanded manifest."""
+    schedule = getattr(manifest, "schedule", None)
+    queries = getattr(manifest, "queries", None)
+    if schedule is None or queries is None:
+        return None
+    field = schedule["phase_field"]
+    counts = {"warmup": 0, "measured": 0}
+    for query in queries:
+        phase = query.metadata[field]
+        if phase not in counts:
+            raise ValueError(f"manifest has invalid stream phase: {phase!r}")
+        counts[phase] += 1
+    return counts
+
+
 def _attempt_timing_summary(records: list[dict[str, Any]]) -> dict[str, Any]:
     """Validate attempt timing and aggregate cumulative phase latency."""
     phases: dict[str, dict[str, int]] = {}
@@ -786,6 +807,16 @@ def _attempt_timing_summary(records: list[dict[str, Any]]) -> dict[str, Any]:
         phase = record.get("phase")
         if phase not in {"warmup", "measured"}:
             raise ValueError(f"record {index} has invalid timing phase: {phase!r}")
+        if record.get("stream_phase") != phase:
+            raise ValueError(
+                f"record {index} stream_phase differs from phase"
+            )
+        position = record.get("stream_position")
+        if (not isinstance(position, int) or isinstance(position, bool)
+                or position < 0):
+            raise ValueError(
+                f"record {index} has invalid stream_position"
+            )
         aggregate = phases.setdefault(
             phase,
             {
@@ -831,7 +862,14 @@ def _result_summary(path: Path, experiment, representation: str) -> dict[str, An
         row.get("skip_kind") == "manual-query-flavour-policy" for row in records
     )
     automatic_skipped = sum(
-        row.get("skip_kind") == "automatic-query-flavour-quarantine"
+        row.get("skip_kind") in {
+            "automatic-query-flavour-quarantine",
+            "in-run-template-timeout-quarantine",
+        }
+        for row in records
+    )
+    in_run_skipped = sum(
+        row.get("skip_kind") == "in-run-template-timeout-quarantine"
         for row in records
     )
     quarantine_probes = sum(row.get("quarantine_probe") is True for row in records)
@@ -845,6 +883,7 @@ def _result_summary(path: Path, experiment, representation: str) -> dict[str, An
         "skipped_count": skipped,
         "manual_skipped_count": manual_skipped,
         "automatic_quarantine_skipped_count": automatic_skipped,
+        "in_run_timeout_quarantine_skipped_count": in_run_skipped,
         "quarantine_probe_count": quarantine_probes,
         "outcome_counts": outcome_counts(records),
         "workload_timing": _attempt_timing_summary(records),
@@ -1080,6 +1119,11 @@ class RdfExperimentMatrixResource:
                             manual_skip_rules=_manual_skip_rules(policy, manifest, system_id),
                             automatic_quarantine_rules=automatic_rules, probe_rules=probe_rules,
                             force_include=force_include,
+                            in_run_timeout_quarantine_threshold=int(
+                                os.environ.get(
+                                    'KROWN_IN_RUN_TIMEOUT_QUARANTINE_THRESHOLD', '0'
+                                )
+                            ),
                         )
                     )
                     query_lifecycle = benchmark.last_lifecycle_timing
@@ -1154,6 +1198,14 @@ class RdfExperimentMatrixResource:
                         "automatic_quarantine_rules": automatic_rules,
                         "probe_rules": probe_rules,
                         "force_include": force_include,
+                        "startup_timeout_s": float(
+                            os.environ.get('KROWN_RDFLIB_STARTUP_TIMEOUT_S', '120')
+                        ),
+                        "in_run_timeout_quarantine_threshold": int(
+                            os.environ.get(
+                                'KROWN_IN_RUN_TIMEOUT_QUARANTINE_THRESHOLD', '0'
+                            )
+                        ),
                     }
                     if "vortex_layout" in specification.parameters:
                         query_parameters["vortex_layout"] = specification.parameters[
@@ -1229,6 +1281,19 @@ class RdfExperimentMatrixResource:
                 measured_ns = time.perf_counter_ns() - measured_started_ns
                 validation_started_ns = time.perf_counter_ns()
                 summary = _result_summary(output_path, experiment, representation)
+                expected_phases = _expected_phase_counts(manifest)
+                actual_phases = {
+                    phase: values["attempt_count"]
+                    for phase, values in (
+                        summary["workload_timing"]["phases"].items()
+                    )
+                }
+                if (expected_phases is not None
+                        and actual_phases != expected_phases):
+                    raise ValueError(
+                        "result phase counts differ from manifest: "
+                        f"expected={expected_phases}, actual={actual_phases}"
+                    )
                 summary["runtime_orchestration"] = binding_runtime_provenance(
                     runtime, probe_rules
                 )

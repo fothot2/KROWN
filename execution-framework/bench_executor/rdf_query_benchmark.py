@@ -439,6 +439,10 @@ class _RdfQueryBenchmark:
             'query_id': query.query_id,
             'query_sha256': query.query_sha256,
             'phase': phase,
+            'stream_phase': phase,
+            'stream_position': query.metadata.get(
+                'stream_position', order
+            ),
             'run': run,
             'order': order,
             'seed': phase_seed,
@@ -451,6 +455,9 @@ class _RdfQueryBenchmark:
         }
         for key, value in query.metadata.items():
             if key in record:
+                if (key in {'stream_phase', 'stream_position'}
+                        and record[key] == value):
+                    continue
                 raise ValueError(
                     f'query metadata replaces reserved field: {key}'
                 )

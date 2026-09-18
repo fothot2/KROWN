@@ -31,6 +31,8 @@ REQUIRED_FIELDS = frozenset({
     'workload',
     'query_id',
     'phase',
+    'stream_phase',
+    'stream_position',
     'run',
     'order',
     'status',
@@ -43,9 +45,10 @@ _STRING_FIELDS = (
     'workload',
     'query_id',
     'phase',
+    'stream_phase',
     'status',
 )
-_INTEGER_FIELDS = ('schema_version', 'run', 'order')
+_INTEGER_FIELDS = ('schema_version', 'stream_position', 'run', 'order')
 
 
 def sha256_bytes(value: bytes) -> str:
@@ -107,6 +110,12 @@ def validate_query_record(record: Mapping[str, Any]) -> dict[str, Any]:
         raise ValueError('run must be zero or greater')
     if validated['order'] < 0:
         raise ValueError('order must be zero or greater')
+    if validated['stream_position'] < 0:
+        raise ValueError('stream_position must be zero or greater')
+    if validated['phase'] not in {'warmup', 'measured'}:
+        raise ValueError('phase must be warmup or measured')
+    if validated['stream_phase'] != validated['phase']:
+        raise ValueError('stream_phase must equal phase')
     if validated['status'] not in QUERY_STATUSES:
         raise ValueError(f'Unsupported status: {validated["status"]}')
 
