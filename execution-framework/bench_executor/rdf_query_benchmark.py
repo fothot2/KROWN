@@ -501,8 +501,11 @@ class _RdfQueryBenchmark:
             })
             for key, value in outcome.metadata.items():
                 if key in record:
+                    if record[key] == value:
+                        continue
                     raise _ResultProcessingError(
-                        f'adapter metadata replaces reserved field: {key}'
+                        'adapter metadata conflicts with existing field: '
+                        f'{key}; query={record[key]!r}; adapter={value!r}'
                     )
                 record[key] = value
         except BaseException as error:
