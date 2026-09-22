@@ -16,11 +16,11 @@ from pathlib import Path, PurePosixPath
 from threading import Thread
 from typing import Dict
 
-import psutil
 import requests
 
 from bench_executor.container import Container
 from bench_executor.logger import Logger
+from bench_executor.resource_profile import VIRTUOSO_LOADER_CORES, virtuoso_buffers
 
 VERSION = '7.2.17'
 MAX_ROWS = '10000000'
@@ -103,10 +103,7 @@ class Virtuoso(Container):
         database_dir = os.path.join(self._data_path, 'virtuoso')
         os.umask(0)
         os.makedirs(database_dir, exist_ok=True)
-        number_of_buffers = int(psutil.virtual_memory().total / (10**9)
-                                * NUMBER_OF_BUFFERS_PER_GB)
-        max_dirty_buffers = int(psutil.virtual_memory().total / (10**9)
-                                * MAX_DIRTY_BUFFERS_PER_GB)
+        number_of_buffers, max_dirty_buffers = virtuoso_buffers()
         environment = {'DBA_PASSWORD': PASSWORD,
                        'VIRT_SPARQL_ResultSetMaxRows': MAX_ROWS,
                        'VIRT_SPARQL_MaxQueryExecutionTime': QUERY_TIMEOUT,
@@ -222,7 +219,7 @@ class Virtuoso(Container):
         success : bool
             Whether the loading was successfull or not.
         """
-        return self.load_parallel(rdf_file, 1, rdf_dir)
+        return self.load_parallel(rdf_file, VIRTUOSO_LOADER_CORES, rdf_dir)
 
     def load_parallel(self, rdf_file: str, cores: int,
                       rdf_dir: str = '') -> bool:

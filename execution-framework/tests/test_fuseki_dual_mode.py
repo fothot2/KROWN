@@ -40,10 +40,12 @@ class FusekiDualModeTests(unittest.TestCase):
         )
 
     def test_runtime_commands_and_mounts_are_mode_specific(self):
-        with patch("bench_executor.fuseki.psutil.virtual_memory") as memory:
-            memory.return_value = SimpleNamespace(total=1024)
-            in_memory = Fuseki("data", "config", "log", False, MEMORY_MODE)
-            tdb2 = Fuseki("data", "config", "log", False, TDB2_MODE)
+        in_memory = Fuseki(
+            "data", "config", "log", False, MEMORY_MODE
+        )
+        tdb2 = Fuseki(
+            "data", "config", "log", False, TDB2_MODE
+        )
         self.assertEqual(in_memory.command_arguments, "--mem --update /ds")
         self.assertEqual(tdb2.command_arguments, "--tdb2 --update --loc /fuseki/databases/DB /ds")
         self.assertNotIn("/fuseki/databases/DB", " ".join(in_memory._volumes))

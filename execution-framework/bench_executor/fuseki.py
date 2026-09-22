@@ -14,11 +14,11 @@ from pathlib import Path
 from time import monotonic, sleep
 from typing import Dict
 
-import psutil
 import requests
 
 from bench_executor.container import Container
 from bench_executor.logger import Logger
+from bench_executor.resource_profile import FUSEKI_HEAPS
 
 VERSION = '6.2.0'
 MEMORY_MODE = 'memory'
@@ -63,8 +63,7 @@ class Fuseki(Container):
         os.umask(0)
         os.makedirs(os.path.join(self._data_path, 'fuseki'), exist_ok=True)
 
-        # Set Java heap to 1/2 of available memory instead of the default 1/4
-        max_heap = int(psutil.virtual_memory().total * (1/2))
+        initial_heap, max_heap = FUSEKI_HEAPS[dataset_mode]
 
         volumes = [f'{self._data_path}/shared:/data']
         if dataset_mode == TDB2_MODE:
@@ -76,7 +75,7 @@ class Fuseki(Container):
                          f'Fuseki-{dataset_mode}', self._logger,
                          ports={'3030': '3030'},
                          environment={
-                             'JAVA_OPTIONS': f'-Xmx{max_heap} -Xms{max_heap}'
+                             'JAVA_OPTIONS': f'-Xms{initial_heap} -Xmx{max_heap}'
                          }, volumes=volumes)
         self._endpoint = 'http://localhost:3030/ds/sparql'
 

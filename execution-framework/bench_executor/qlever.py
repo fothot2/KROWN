@@ -14,6 +14,7 @@ from bench_executor.container import Container
 from bench_executor.docker_cgroup_memory import container_memory_current_bytes
 from bench_executor.resource_memory_sampler import PhaseAwareMemorySampler
 from bench_executor.logger import Logger
+from bench_executor.resource_profile import QLEVER_CACHE_MEMORY, QLEVER_QUERY_MEMORY, QLEVER_SIMULTANEOUS_QUERIES, QLEVER_THREADS
 
 
 READY_TIMEOUT_SECONDS = 120
@@ -60,7 +61,13 @@ class QLever:
         self._logger = Logger(__name__, str(self._directory), verbose)
         self._image = image
         self._index_command = index_command
-        self._server_command = server_command
+        tuning = (
+            f' --memory-max-size {QLEVER_QUERY_MEMORY}'
+            f' --cache-max-size {QLEVER_CACHE_MEMORY}'
+            f' --num-simultaneous-queries {QLEVER_SIMULTANEOUS_QUERIES}'
+            f' --num-threads {QLEVER_THREADS}'
+        )
+        self._server_command = server_command if '--memory-max-size' in server_command else server_command.rstrip(" '") + tuning + ("'" if server_command.rstrip().endswith("'") else "")
         self._port = port
         self._server: Container | None = None
         self.build_metrics = None

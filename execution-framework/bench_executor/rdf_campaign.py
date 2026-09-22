@@ -19,8 +19,9 @@ from typing import Callable, Mapping, Sequence
 SCHEMA = "rdf-campaign-specification-v2"
 SAFE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 REPORTABLE = frozenset({"completed", "completed-with-failures"})
-FAILED = frozenset({"structural-failure", "timed-out", "interrupted", "infrastructure-blocked"})
+FAILED = frozenset({"structural-failure", "timed-out", "interrupted", "infrastructure-blocked", "confirmed-oom"})
 MATRIX_CONTAINER_PREFIXES = ("Fuseki", "Virtuoso", "QLever", "qlever_", "Oxigraph-")
+from bench_executor.resource_profile import provenance as resource_profile_provenance
 
 
 def now() -> str:
@@ -107,6 +108,31 @@ def require_clean_matrix_environment(stage: str) -> None:
             + ", ".join(containers)
         )
 
+
+
+def cleanup_matrix_containers() -> dict[str, object]:
+    """Collect OOM evidence and remove all adapter-owned containers."""
+    result={"containers":[],"confirmed_oom":False}
+    names=subprocess.run(["docker","ps","-a","--format","{{.Names}}"],text=True,capture_output=True,check=False)
+    if names.returncode!=0: return result
+    for name in sorted(n for n in names.stdout.splitlines() if n.startswith(MATRIX_CONTAINER_PREFIXES)):
+        inspected=subprocess.run(["docker","inspect","--format","{{json .State}}",name],text=True,capture_output=True,check=False)
+        state={}
+        if inspected.returncode==0:
+            try: state=json.loads(inspected.stdout)
+            except ValueError: state={}
+        oom=state.get("OOMKilled") is True
+        result["confirmed_oom"] = result["confirmed_oom"] or oom
+        result["containers"].append({"name":name,"oom_killed":oom,"exit_code":state.get("ExitCode"),"error":state.get("Error")})
+        subprocess.run(["docker","rm","--force",name],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,check=False)
+    return result
+
+def scoped_matrix_command(command: Sequence[str], unit: str) -> list[str]:
+    return ["systemd-run","--user","--scope","--quiet",f"--unit={unit}","-p","MemoryHigh=58G","-p","MemoryMax=58G","-p","MemorySwapMax=0","-p","OOMPolicy=stop","-p","KillMode=control-group","--",*command]
+
+def scope_oom_killed(unit: str) -> bool:
+    value=subprocess.run(["systemctl","--user","show",unit,"--property=Result","--value"],text=True,capture_output=True,check=False)
+    return value.returncode==0 and value.stdout.strip()=="oom-kill"
 
 def declaration_systems(path: str | Path) -> tuple[str, ...]:
     value = json.loads(Path(path).read_text(encoding="utf-8"))
@@ -283,18 +309,17 @@ class RdfCampaign:
         detail = None
         try:
             with log.open("a", encoding="utf-8") as stream:
+                unit = f"krown-rdf-{run_id}-{safe}"[:240]
                 result = self.executor(
-                    self._matrix_command(run_id, system, raw), cwd=Path('/users/u0182905/KROWN'), env=dict(environment),
+                    scoped_matrix_command(self._matrix_command(run_id, system, raw), unit), cwd=Path('/users/u0182905/KROWN'), env=dict(environment),
                     stdout=stream, stderr=subprocess.STDOUT, timeout=self.spec.system_limit_s, check=False,
                 )
             exit_code = result.returncode
-            remaining_containers = matrix_owned_containers()
-            if remaining_containers:
-                status = "infrastructure-blocked"
-                detail = (
-                    "matrix-owned containers remain after system execution: "
-                    + ", ".join(remaining_containers)
-                )
+            cleanup = cleanup_matrix_containers()
+            confirmed_oom = scope_oom_killed(unit) or bool(cleanup["confirmed_oom"])
+            if confirmed_oom:
+                status = "confirmed-oom"
+                detail = "system process tree or container reached the 58 GiB memory limit"
                 success = False
             else:
                 success = exit_code == 0 and (shared_raw / "summary.json").is_file() and (shared_raw / "results.tar.gz").is_file()
@@ -342,6 +367,7 @@ class RdfCampaign:
             "infrastructure_blocked_count": sum(
                 row.get("state") == "infrastructure-blocked" for row in rows
             ),
+            "confirmed_oom_count": sum(row.get("state") == "confirmed-oom" for row in rows),
         }
 
     def _inter_run(self, campaign_root: Path, systems: Sequence[str], outcomes: Sequence[Mapping[str, object]], environment: Mapping[str, str]) -> dict[str, object]:
@@ -388,7 +414,7 @@ class RdfCampaign:
                         "resume differs from immutable campaign plan or its input hashes"
                     )
             else:
-                atomic_json(plan_path, {**identity, "created_at_utc": now()})
+                atomic_json(plan_path, {**identity, "resource_profile": resource_profile_provenance(), "created_at_utc": now()})
 
             try:
                 require_clean_matrix_environment("campaign preflight")

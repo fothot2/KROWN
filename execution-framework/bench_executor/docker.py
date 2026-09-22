@@ -13,6 +13,7 @@ import subprocess
 from time import sleep
 from typing import List, Tuple
 from bench_executor.logger import Logger
+from bench_executor.resource_profile import DOCKER_MEMORY, DOCKER_MEMORY_SWAP
 
 
 class Docker():
@@ -208,6 +209,8 @@ class Docker():
         cmd = f'docker run --name "{name}"'
         if detach:
             cmd += ' --detach'
+        cmd += f' --memory {DOCKER_MEMORY} --memory-swap {DOCKER_MEMORY_SWAP}'
+        cmd += ' --memory-swappiness 0'
         for variable, value in environment.items():
             cmd += f' --env "{variable}={value}"'
         for host_port, container_port in ports.items():
