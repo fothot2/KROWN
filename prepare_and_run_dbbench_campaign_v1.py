@@ -24,6 +24,8 @@ EXPERIMENTS = DBBENCH / "experiments"
 BENCH_DATA = DBBENCH / "data/dbpedia-en-all"
 PRESERVED_TDB2_POINTER = SCENARIO / "preserved-fuseki-tdb2-path.txt"
 TDB2_RECEIPT = BENCH_DATA / "fuseki-tdb2-store-receipt.json"
+VIRTUOSO_POINTER = SCENARIO / "preserved-virtuoso-path.txt"
+VIRTUOSO_RECEIPT = BENCH_DATA / "virtuoso-store-receipt.json"
 
 VALIDATION_GATE_CAMPAIGN_ID = 'dbbench-dbpedia-vortex-gate-20260921T185447Z'
 
@@ -141,6 +143,47 @@ def prepare_fuseki_tdb2_receipt() -> tuple[Path, Path]:
         ),
     })
     return store, TDB2_RECEIPT
+
+
+
+def prepare_virtuoso_receipt() -> tuple[Path, Path]:
+    if not VIRTUOSO_POINTER.is_file():
+        raise FileNotFoundError(
+            'Virtuoso reuse requires ' + str(VIRTUOSO_POINTER)
+        )
+    store = Path(VIRTUOSO_POINTER.read_text().strip()).resolve()
+    if not store.is_dir():
+        raise FileNotFoundError(store)
+    excluded = {
+        'virtuoso-temp.db', 'virtuoso.ini', 'virtuoso.lck',
+        'virtuoso.log', 'virtuoso.pxa', 'virtuoso.trx',
+    }
+    files = [
+        {
+            'path': item.relative_to(store).as_posix(),
+            'size_bytes': item.stat().st_size,
+        }
+        for item in sorted(store.rglob('*'))
+        if item.is_file() and item.name not in excluded
+    ]
+    if not files:
+        raise RuntimeError('preserved Virtuoso store is empty')
+    source = read_json(BENCH_DATA / 'rdf-source-receipt.json')
+    atomic_json(VIRTUOSO_RECEIPT, {
+        'schema': 'virtuoso-store-receipt-v1',
+        'representation': 'virtuoso/store',
+        'source_sha256': source['source']['sha256'],
+        'source_size_bytes': source['source']['size_bytes'],
+        'store_path': str(store),
+        'files': files,
+        'logical_bytes': sum(item['size_bytes'] for item in files),
+        'allocated_bytes': sum(
+            item.stat().st_blocks * 512
+            for item in store.rglob('*')
+            if item.is_file() and item.name not in excluded
+        ),
+    })
+    return store, VIRTUOSO_RECEIPT
 
 def validated_invalid_source_queries() -> tuple[set[str], list[dict[str, Any]]]:
     """Return the deterministic invalid source-query set from the 3-run gate."""
@@ -417,6 +460,9 @@ def main() -> int:
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--retry-failed", action="store_true")
     parser.add_argument("--prepare-only", action="store_true")
+    parser.add_argument(
+        "--virtuoso-mode", choices=("build", "reuse"), default="reuse"
+    )
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
@@ -428,6 +474,16 @@ def main() -> int:
 
     declaration_path, _ = prepare_files()
     reuse_store, reuse_receipt = prepare_fuseki_tdb2_receipt()
+    virtuoso_store = virtuoso_receipt = None
+    virtuoso_selected = (
+        not args.system
+        or 'virtuoso/default' in args.system
+    )
+    if (
+        virtuoso_selected
+        and args.virtuoso_mode == 'reuse'
+    ):
+        virtuoso_store, virtuoso_receipt = prepare_virtuoso_receipt()
     if args.prepare_only:
         print("DBBENCH CAMPAIGN PREPARATION OK")
         print(f"declaration={declaration_path}")
@@ -468,6 +524,13 @@ def main() -> int:
     environment["KROWN_FUSEKI_TDB2_MODE"] = "reuse"
     environment["KROWN_FUSEKI_TDB2_REUSE_PATH"] = str(reuse_store)
     environment["KROWN_FUSEKI_TDB2_RECEIPT"] = str(reuse_receipt)
+    environment["KROWN_VIRTUOSO_MODE"] = args.virtuoso_mode
+    if (
+        virtuoso_selected
+        and args.virtuoso_mode == 'reuse'
+    ):
+        environment["KROWN_VIRTUOSO_REUSE_PATH"] = str(virtuoso_store)
+        environment["KROWN_VIRTUOSO_RECEIPT"] = str(virtuoso_receipt)
     environment.setdefault("KROWN_RDFLIB_STARTUP_TIMEOUT_S", "1800")
     return subprocess.run(command, cwd=KROWN, env=environment, check=False).returncode
 

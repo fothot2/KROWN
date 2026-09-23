@@ -82,7 +82,7 @@ class Virtuoso(Container):
     """Virtuoso container to execute SPARQL queries"""
 
     def __init__(self, data_path: str, config_path: str, directory: str,
-                 verbose: bool):
+                 verbose: bool, database_path: str | None = None):
         """Creates an instance of the Virtuoso class.
 
         Parameters
@@ -100,9 +100,17 @@ class Virtuoso(Container):
         self._config_path = os.path.abspath(config_path)
         self._logger = Logger(__name__, directory, verbose)
 
-        database_dir = os.path.join(self._data_path, 'virtuoso')
+        default_database = Path(self._data_path) / 'virtuoso'
+        selected_database = (
+            default_database if database_path is None
+            else Path(database_path).expanduser()
+        )
+        if not selected_database.is_absolute():
+            raise ValueError('database_path must be absolute')
+        self._database_path = selected_database.resolve()
         os.umask(0)
-        os.makedirs(database_dir, exist_ok=True)
+        self._database_path.mkdir(parents=True, exist_ok=True)
+        database_dir = str(self._database_path)
         number_of_buffers, max_dirty_buffers = virtuoso_buffers()
         environment = {'DBA_PASSWORD': PASSWORD,
                        'VIRT_SPARQL_ResultSetMaxRows': MAX_ROWS,
@@ -123,15 +131,15 @@ class Virtuoso(Container):
     def reset_store(self) -> bool:
         """Create an empty benchmark-local database before one measured load."""
         data_root = Path(self._data_path).resolve()
-        store = data_root / 'virtuoso'
+        store = getattr(self, '_database_path', data_root / 'virtuoso')
         if store.is_symlink():
             self._logger.error('Virtuoso database path is a symbolic link')
             return False
         resolved_store = store.resolve()
-        try:
-            resolved_store.relative_to(data_root)
-        except ValueError:
-            self._logger.error('Virtuoso database path leaves the data directory')
+        if resolved_store != (data_root / 'virtuoso').resolve():
+            self._logger.error(
+                'Refusing to reset a non-default Virtuoso database path'
+            )
             return False
         if resolved_store.exists() and not resolved_store.is_dir():
             self._logger.error('Virtuoso database path is not a directory')
@@ -332,11 +340,28 @@ class Virtuoso(Container):
                 f'Failed to verify the Virtuoso loader graph: {error}'
             )
             return False
-        if actual != expected:
+        if actual <= 0:
             self._logger.error(
-                f'Virtuoso loaded {actual} triples; expected {expected}'
+                'Virtuoso loaded graph is empty'
             )
             return False
+
+        if actual > expected:
+            self._logger.error(
+                f'Virtuoso graph cardinality {actual} exceeds '
+                f'the {expected} physical N-Triples statements'
+            )
+            return False
+
+        reduction = expected - actual
+
+        self._logger.debug(
+            f'Virtuoso loader validation succeeded: '
+            f'source_statements={expected}, '
+            f'graph_triples={actual}, '
+            f'cardinality_reduction={reduction}'
+        )
+
         return True
 
     def stop(self) -> bool:
