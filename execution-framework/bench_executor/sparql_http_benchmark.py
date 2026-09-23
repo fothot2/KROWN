@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Run canonical SPARQL SELECT and ASK workloads over HTTP."""
 
+import multiprocessing as mp
 import os
 import time
 
@@ -91,6 +92,56 @@ def _normalize_graph_response(body: bytes, media_type: str) -> dict:
     )
 
 
+
+def _count_http_result_worker(connection, endpoint, query, system, request_max_rows):
+    """Execute and fully materialize one HTTP result in a killable process."""
+    try:
+        result_type = classify_query(query).result_type
+        accept = ('application/n-triples, text/turtle;q=0.9'
+                  if result_type in {'construct', 'describe'}
+                  else 'application/sparql-results+json')
+        data = {'query': query}
+        if request_max_rows is not None:
+            data['maxrows'] = str(request_max_rows)
+        if system == _VIRTUOSO_SYSTEM:
+            data['default-graph-uri'] = _VIRTUOSO_DEFAULT_GRAPH
+        started_ns = time.perf_counter_ns()
+        response = requests.post(endpoint, data=data, headers={'Accept': accept}, timeout=None)
+        body = response.content
+        execute_ns = time.perf_counter_ns() - started_ns
+        response.raise_for_status()
+        count_started_ns = time.perf_counter_ns()
+        content_type = response.headers.get('Content-Type', '')
+        media_type = content_type.split(';', 1)[0].strip().lower()
+        if media_type in {'application/sparql-results+json', 'application/json'}:
+            document = response.json()
+            if 'boolean' in document:
+                if not isinstance(document['boolean'], bool):
+                    raise ValueError('SPARQL ASK boolean must be true or false')
+                result_count = 1 if document['boolean'] else 0
+                result_kind = 'ask'
+            else:
+                bindings = document.get('results', {}).get('bindings')
+                if not isinstance(bindings, list):
+                    raise ValueError('SPARQL SELECT bindings must be an array')
+                result_count = len(bindings)
+                result_kind = 'select'
+        else:
+            rdf_format = _GRAPH_MEDIA_TYPES.get(media_type)
+            if rdf_format is None:
+                raise RuntimeError(f'Unsupported SPARQL HTTP response type: {media_type!r}')
+            graph = Graph(); graph.parse(data=body, format=rdf_format)
+            result_count = len(graph); result_kind = 'graph'
+        count_ns = time.perf_counter_ns() - count_started_ns
+        connection.send({'status':'ok','result_count':result_count,'execute_ns':execute_ns,
+                         'count_ns':count_ns,'response_bytes':len(body),
+                         'http_status':response.status_code,'result_kind':result_kind})
+    except BaseException as error:
+        try: connection.send({'status':'error','error_type':type(error).__name__,'error_message':str(error)})
+        except (BrokenPipeError, OSError): pass
+    finally:
+        connection.close()
+
 class _SparqlHttpAdapter(_RdfQueryAdapter):
     """Send SPARQL over HTTP and consume each complete response body."""
 
@@ -154,6 +205,33 @@ class _SparqlHttpAdapter(_RdfQueryAdapter):
             data['maxrows'] = str(self._request_max_rows)
         if self._system == _VIRTUOSO_SYSTEM:
             data['default-graph-uri'] = _VIRTUOSO_DEFAULT_GRAPH
+        if self._correctness_mode == 'count-only':
+            parent, child = mp.Pipe(duplex=False)
+            process = mp.Process(target=_count_http_result_worker,
+                args=(child, self._endpoint, query, self._system, self._request_max_rows),
+                name='krown-sparql-http-attempt', daemon=True)
+            attempt_started_ns = time.perf_counter_ns(); process.start(); child.close()
+            if not parent.poll(self._timeout_s):
+                process.terminate(); process.join(timeout=0.5)
+                if process.is_alive(): process.kill(); process.join(timeout=0.5)
+                parent.close()
+                raise _QueryTimeoutError(
+                    f'SPARQL HTTP complete attempt exceeded {self._timeout_s}s')
+            message = parent.recv(); parent.close(); process.join(timeout=0.5)
+            if message.get('status') != 'ok':
+                raise RuntimeError(f"{message.get('error_type')}: {message.get('error_message')}")
+            attempt_ns = time.perf_counter_ns() - attempt_started_ns
+            execute_ns = int(message['execute_ns']); count_ns = int(message['count_ns'])
+            return _QueryOutcome(result_count=int(message['result_count']),
+                result_fingerprint=None, elapsed_ns=execute_ns,
+                metadata={'measurement_boundary':'sparql-http-complete-response-count-only',
+                    'comparison_mode':'count-only','http_status':message['http_status'],
+                    'response_bytes':message['response_bytes'],'result_kind':message['result_kind'],
+                    'request_max_rows':self._request_max_rows,
+                    'result_cap_requested':self._request_max_rows is not None},
+                stage_timings_ns={'engine_execute_and_transfer':execute_ns,
+                    'result_materialize_and_count':count_ns,
+                    'worker_dispatch':max(0, attempt_ns-execute_ns-count_ns)})
         started_ns = time.perf_counter_ns()
         try:
             response = self._session.post(
@@ -272,7 +350,8 @@ class SparqlHttpBenchmark:
                 skip_after_warmup_error: bool = True,
                 memory_sampler=None, manual_skip_rules=(),
                 automatic_quarantine_rules=(), probe_rules=(),
-                force_include: bool = False) -> bool:
+                force_include: bool = False,
+                in_run_timeout_quarantine_threshold: int = 0) -> bool:
         """Execute the workload and write canonical JSON Lines records."""
         try:
             manifest_path = self._shared_path(manifest_file, output=False)
@@ -306,6 +385,9 @@ class SparqlHttpBenchmark:
                 manual_skip_rules=manual_skip_rules,
                 automatic_quarantine_rules=automatic_quarantine_rules,
                 probe_rules=probe_rules, force_include=force_include,
+                in_run_timeout_quarantine_threshold=(
+                    in_run_timeout_quarantine_threshold
+                ),
             )
             records = benchmark.run(output_path)
             self.last_lifecycle_timing = benchmark.last_lifecycle_timing

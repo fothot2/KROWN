@@ -11,7 +11,7 @@ from rdflib import BNode, Literal, URIRef
 from bench_executor.query_features import classify_query, \
         comparison_metadata
 
-CORRECTNESS_MODES = frozenset({'none', 'fingerprint', 'full'})
+CORRECTNESS_MODES = frozenset({'none', 'count-only', 'fingerprint', 'full'})
 _XSD = 'http://www.w3.org/2001/XMLSchema#'
 _CANONICAL_DATATYPES = {
     _XSD + 'int': _XSD + 'integer',

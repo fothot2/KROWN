@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import hashlib
+import json
+import os
 import time
 from pathlib import Path
 
@@ -17,6 +19,25 @@ from bench_executor.sparql_http_system_adapter import (
     sparql_http_system_specifications,
 )
 
+
+BUILD_MODE = 'build'
+REUSE_MODE = 'reuse'
+
+def _store_inventory(path: Path) -> list[dict]:
+    excluded = {'tdb.lock', 'journal.jrnl'}
+    return [
+        {'path': item.relative_to(path).as_posix(), 'size_bytes': item.stat().st_size}
+        for item in sorted(path.rglob('*'))
+        if item.is_file() and item.name not in excluded
+    ]
+
+def _verify_store_receipt(store: Path, receipt: Path) -> dict:
+    value = json.loads(receipt.read_text(encoding='utf-8'))
+    if value.get('schema') != 'fuseki-tdb2-store-receipt-v1':
+        raise ValueError('unsupported Fuseki TDB2 receipt')
+    if not store.is_dir() or _store_inventory(store) != value.get('files'):
+        raise ValueError('Fuseki TDB2 store differs from its receipt')
+    return value
 
 def _fuseki_specification(dataset_mode: str):
     system_id = f'fuseki/{dataset_mode}'
@@ -39,11 +60,27 @@ class FusekiSystemAdapter(SparqlHttpSystemAdapter):
 
     def __init__(self, artifact: DatasetArtifact, data_path: str,
                  config_path: str, directory: str, verbose: bool = False,
-                 dataset_mode: str = TDB2_MODE):
+                 dataset_mode: str = TDB2_MODE,
+                 lifecycle_mode: str | None = None,
+                 reuse_store_path: str | None = None,
+                 reuse_receipt_path: str | None = None):
         if dataset_mode not in {MEMORY_MODE, TDB2_MODE}:
             raise ValueError(f'Unsupported Fuseki dataset mode: {dataset_mode}')
         super().__init__(_fuseki_specification(dataset_mode), artifact)
         self._dataset_mode = dataset_mode
+        default_lifecycle = (
+            os.environ.get('KROWN_FUSEKI_TDB2_MODE', BUILD_MODE)
+            if dataset_mode == TDB2_MODE else BUILD_MODE
+        )
+        self._lifecycle_mode = lifecycle_mode or default_lifecycle
+        if self._lifecycle_mode not in {BUILD_MODE, REUSE_MODE}:
+            raise ValueError(f'Unsupported Fuseki lifecycle mode: {self._lifecycle_mode}')
+        self._reuse_store = Path(reuse_store_path or os.environ.get(
+            'KROWN_FUSEKI_TDB2_REUSE_PATH', '')).expanduser().resolve()
+        self._reuse_receipt = Path(reuse_receipt_path or os.environ.get(
+            'KROWN_FUSEKI_TDB2_RECEIPT', '')).expanduser().resolve()
+        if getattr(self, '_lifecycle_mode', BUILD_MODE) == REUSE_MODE and dataset_mode != TDB2_MODE:
+            raise ValueError('reuse mode is supported only for Fuseki TDB2')
         if artifact.source_format != 'ntriples':
             raise ValueError('Fuseki rdf/source artifact must use ntriples')
         if len(artifact.files) != 1:
@@ -86,16 +123,42 @@ class FusekiSystemAdapter(SparqlHttpSystemAdapter):
             return False
         if _sha256(source) != self._rdf_file.sha256:
             return False
+        database_path = None
+        if getattr(self, '_lifecycle_mode', BUILD_MODE) == REUSE_MODE:
+            if not self._reuse_receipt.is_file():
+                return False
+            try:
+                receipt = _verify_store_receipt(self._reuse_store, self._reuse_receipt)
+            except (OSError, ValueError, json.JSONDecodeError):
+                return False
+            if receipt.get('source_sha256') != self.artifact.source_sha256:
+                return False
+            database_path = str(self._reuse_store)
+            self.representation_size = {
+                'schema': 'rdf-database-representation-size-v1',
+                'boundary': 'verified-existing-representation',
+                'logical_bytes': sum(item['size_bytes'] for item in receipt['files']),
+                'allocated_bytes': receipt.get('allocated_bytes'),
+                'file_count': len(receipt['files']),
+            }
+            self.build_metrics = {
+                'schema': 'rdf-database-build-metrics-v1',
+                'boundary': 'prebuilt-representation-reuse',
+                'status': 'not-measured-in-query-run',
+                'receipt': str(self._reuse_receipt),
+            }
         self._fuseki = Fuseki(
             str(self._data_path), str(self._config_path),
             str(self._directory), self._verbose, self._dataset_mode,
+            database_path=database_path,
         )
         return True
 
     def start(self) -> bool:
         if self._fuseki is None:
             return False
-        if self._dataset_mode == TDB2_MODE:
+        if (self._dataset_mode == TDB2_MODE
+                and getattr(self, '_lifecycle_mode', BUILD_MODE) == BUILD_MODE):
             if not self._fuseki.reset_store():
                 return False
         return self._fuseki.wait_until_ready()
@@ -105,6 +168,13 @@ class FusekiSystemAdapter(SparqlHttpSystemAdapter):
             return False
         if self.memory_sampler is None:
             raise RuntimeError('Fuseki build memory sampler is not active')
+        if getattr(self, '_lifecycle_mode', BUILD_MODE) == REUSE_MODE:
+            self.load_metrics = {
+                'schema': 'rdf-database-build-metrics-v1',
+                'boundary': 'prebuilt-representation-reuse',
+                'status': 'not-applicable',
+            }
+            return True
         started_ns = time.perf_counter_ns()
         succeeded = self._fuseki.load(self._rdf_file.path)
         elapsed_ns = time.perf_counter_ns() - started_ns
@@ -141,7 +211,13 @@ class FusekiSystemAdapter(SparqlHttpSystemAdapter):
     def stop(self) -> bool:
         if self._fuseki is None:
             return True
-        return self._fuseki.stop()
+        succeeded = self._fuseki.stop()
+        if succeeded and getattr(self, '_lifecycle_mode', BUILD_MODE) == REUSE_MODE:
+            try:
+                _verify_store_receipt(self._reuse_store, self._reuse_receipt)
+            except (OSError, ValueError, json.JSONDecodeError):
+                return False
+        return succeeded
 
     def collect(self) -> bool:
         """Leave log collection to the stock KROWN logger and executor."""

@@ -97,7 +97,12 @@ class _RdfLibAdapter(_RdfQueryAdapter):
         result = self._graph.query(query)
         execute_ns = time.perf_counter_ns() - started_ns
         materialize_started_ns = time.perf_counter_ns()
-        rows = list(result)
+        if self._correctness_mode == 'count-only':
+            rows = None
+            result_count = sum(1 for _ in result)
+        else:
+            rows = list(result)
+            result_count = len(rows)
         materialize_ns = time.perf_counter_ns() - materialize_started_ns
         elapsed_ns = execute_ns + materialize_ns
         correctness_started_ns = time.perf_counter_ns()
@@ -105,7 +110,8 @@ class _RdfLibAdapter(_RdfQueryAdapter):
             'measurement_boundary': 'rdflib-full-result-materialization',
         }
         fingerprint = None
-        if self._correctness_mode != 'none':
+        metadata['comparison_mode'] = self._correctness_mode
+        if self._correctness_mode not in {'none', 'count-only'}:
             correctness = normalize_materialized_result(result, rows, query)
             fingerprint = correctness.pop('result_fingerprint')
             normalized = correctness.pop('normalized_result')
@@ -118,7 +124,7 @@ class _RdfLibAdapter(_RdfQueryAdapter):
                     metadata['normalized_result'] = normalized
         correctness_ns = time.perf_counter_ns() - correctness_started_ns
         return _QueryOutcome(
-            result_count=len(rows), result_fingerprint=fingerprint,
+            result_count=result_count, result_fingerprint=fingerprint,
             elapsed_ns=elapsed_ns + correctness_ns, metadata=metadata,
             stage_timings_ns={
                 'engine_execute': execute_ns,
@@ -192,7 +198,12 @@ def _rdflib_worker(connection, engine: str, artifact_path: str,
                 result = graph.query(query)
                 execute_ns = time.perf_counter_ns() - started_ns
                 materialize_started_ns = time.perf_counter_ns()
-                rows = list(result)
+                if correctness_mode == 'count-only':
+                    rows = None
+                    result_count = sum(1 for _ in result)
+                else:
+                    rows = list(result)
+                    result_count = len(rows)
                 materialize_ns = time.perf_counter_ns() - materialize_started_ns
                 correctness_started_ns = time.perf_counter_ns()
                 elapsed_ns = execute_ns + materialize_ns
@@ -200,16 +211,17 @@ def _rdflib_worker(connection, engine: str, artifact_path: str,
                     'kind': 'result',
                     'request_id': request_id,
                     'status': 'ok',
-                    'result_count': len(rows),
+                    'result_count': result_count,
                     'elapsed_ns': elapsed_ns,
                     'metadata': {
                         'measurement_boundary': (
                             'rdflib-full-result-materialization'
                         ),
+                        'comparison_mode': correctness_mode,
                     },
                     'result_fingerprint': None,
                 }
-                if correctness_mode != 'none':
+                if correctness_mode not in {'none', 'count-only'}:
                     correctness = normalize_materialized_result(
                         result, rows, query
                     )
@@ -508,7 +520,8 @@ class RdfLibQueryBenchmark:
                 manual_skip_rules=(),
                 automatic_quarantine_rules=(),
                 probe_rules=(),
-                force_include: bool = False) -> bool:
+                force_include: bool = False,
+                in_run_timeout_quarantine_threshold: int = 0) -> bool:
         """Execute an RDFLib-backed workload and save JSON Lines records."""
         try:
             if engine not in SUPPORTED_ENGINES:
@@ -576,6 +589,9 @@ class RdfLibQueryBenchmark:
                 automatic_quarantine_rules=automatic_quarantine_rules,
                 probe_rules=probe_rules,
                 force_include=force_include,
+                in_run_timeout_quarantine_threshold=(
+                    in_run_timeout_quarantine_threshold
+                ),
             )
             records = benchmark.run(output_path)
             self.last_lifecycle_timing = benchmark.last_lifecycle_timing

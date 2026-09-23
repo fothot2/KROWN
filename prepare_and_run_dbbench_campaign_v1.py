@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import hashlib
 import subprocess
 import sys
 import tarfile
@@ -21,6 +22,8 @@ DATA = SCENARIO / "data/shared"
 MANIFESTS = DATA / "manifests"
 EXPERIMENTS = DBBENCH / "experiments"
 BENCH_DATA = DBBENCH / "data/dbpedia-en-all"
+PRESERVED_TDB2_POINTER = SCENARIO / "preserved-fuseki-tdb2-path.txt"
+TDB2_RECEIPT = BENCH_DATA / "fuseki-tdb2-store-receipt.json"
 
 VALIDATION_GATE_CAMPAIGN_ID = 'dbbench-dbpedia-vortex-gate-20260921T185447Z'
 
@@ -108,6 +111,36 @@ def stage_receipts() -> None:
     atomic_json(BENCH_DATA / "dataset-inventory.json", inventory)
 
 
+
+
+def prepare_fuseki_tdb2_receipt() -> tuple[Path, Path]:
+    if not PRESERVED_TDB2_POINTER.is_file():
+        raise FileNotFoundError(PRESERVED_TDB2_POINTER)
+    store = Path(PRESERVED_TDB2_POINTER.read_text().strip()).resolve()
+    if not store.is_dir():
+        raise FileNotFoundError(store)
+    excluded = {'tdb.lock', 'journal.jrnl'}
+    files = [
+        {'path': item.relative_to(store).as_posix(), 'size_bytes': item.stat().st_size}
+        for item in sorted(store.rglob('*'))
+        if item.is_file() and item.name not in excluded
+    ]
+    if not files:
+        raise RuntimeError('preserved Fuseki TDB2 store is empty')
+    source = read_json(BENCH_DATA / 'rdf-source-receipt.json')
+    atomic_json(TDB2_RECEIPT, {
+        'schema': 'fuseki-tdb2-store-receipt-v1',
+        'representation': 'fuseki/tdb2-store',
+        'source_sha256': source['source']['sha256'],
+        'source_size_bytes': source['source']['size_bytes'],
+        'store_path': str(store),
+        'files': files,
+        'logical_bytes': sum(item['size_bytes'] for item in files),
+        'allocated_bytes': sum(
+            item.stat().st_blocks * 512 for item in store.rglob('*') if item.is_file()
+        ),
+    })
+    return store, TDB2_RECEIPT
 
 def validated_invalid_source_queries() -> tuple[set[str], list[dict[str, Any]]]:
     """Return the deterministic invalid source-query set from the 3-run gate."""
@@ -236,10 +269,14 @@ def preexpanded_manifest(
         query for query in base["queries"]
         if query["query_id"] not in invalid_source_ids
     ]
-    by_family: dict[str, dict[str, Any]] = {}
-    for query in measured:
-        by_family.setdefault(reporting_family(query), query)
-    warmup = [by_family[key] for key in sorted(by_family)]
+    # Warm only with deterministic selective triple-pattern queries.
+    # Per-family first queries can include explosive many-to-many joins.
+    warmup = [
+        query for query in measured
+        if query.get('source_top_group') == 'TP'
+    ][:10]
+    if len(warmup) != 10:
+        raise RuntimeError(f'expected 10 deterministic TP warmups, found {len(warmup)}')
 
     records = []
     position = 0
@@ -250,6 +287,8 @@ def preexpanded_manifest(
         item["stream_phase"] = "warmup"
         item["stream_position"] = position
         item["reporting_family"] = reporting_family(source)
+        item["comparison_mode"] = "count-only"
+        item["comparison_warning"] = None
         # Compatibility alias for the current generic in-run quarantine selector.
         item["bsbm_template_id"] = item["reporting_family"]
         records.append(item)
@@ -261,6 +300,8 @@ def preexpanded_manifest(
         item["stream_phase"] = "measured"
         item["stream_position"] = position
         item["reporting_family"] = reporting_family(source)
+        item["comparison_mode"] = "count-only"
+        item["comparison_warning"] = None
         item["bsbm_template_id"] = item["reporting_family"]
         records.append(item)
         position += 1
@@ -386,6 +427,7 @@ def main() -> int:
         raise ValueError("Unsupported systems: " + ", ".join(unknown))
 
     declaration_path, _ = prepare_files()
+    reuse_store, reuse_receipt = prepare_fuseki_tdb2_receipt()
     if args.prepare_only:
         print("DBBENCH CAMPAIGN PREPARATION OK")
         print(f"declaration={declaration_path}")
@@ -423,6 +465,9 @@ def main() -> int:
 
     environment = dict(os.environ)
     environment["KROWN_IN_RUN_TIMEOUT_QUARANTINE_THRESHOLD"] = "20"
+    environment["KROWN_FUSEKI_TDB2_MODE"] = "reuse"
+    environment["KROWN_FUSEKI_TDB2_REUSE_PATH"] = str(reuse_store)
+    environment["KROWN_FUSEKI_TDB2_RECEIPT"] = str(reuse_receipt)
     environment.setdefault("KROWN_RDFLIB_STARTUP_TIMEOUT_S", "1800")
     return subprocess.run(command, cwd=KROWN, env=environment, check=False).returncode
 

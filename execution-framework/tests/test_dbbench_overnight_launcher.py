@@ -40,6 +40,12 @@ class DbbenchOvernightLauncherTests(unittest.TestCase):
         self.assertTrue(invalid.isdisjoint(source_ids))
         positions = [query['stream_position'] for query in manifest['queries']]
         self.assertEqual(positions, list(range(len(positions))))
+        self.assertEqual(manifest['warmup_query_count'], 10)
+        self.assertTrue(all(
+            query['comparison_mode'] == 'count-only'
+            and query['comparison_warning'] is None
+            for query in manifest['queries']
+        ))
 
     def test_repetitions_is_forwarded(self):
         argv = [

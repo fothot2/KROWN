@@ -587,6 +587,11 @@ def _automatic_quarantine_rules(snapshot_path, manifest, system_id):
     return tuple(result)
 
 
+
+def _correctness_mode(manifest) -> str:
+    """Select DBBench count-only without changing other workloads."""
+    return 'count-only' if manifest.workload == 'dbbench-dbpedia-full' else 'fingerprint'
+
 def _run_file_backed(
     adapter,
     artifact_path: Path,
@@ -1131,7 +1136,7 @@ class RdfExperimentMatrixResource:
                             timeout_s=float(policy["timeout_s"]),
                             warmup_runs=int(policy["warmup_runs"]),
                             measured_runs=int(policy["measured_runs"]),
-                            correctness_mode="fingerprint",
+                            correctness_mode=_correctness_mode(manifest),
                             request_max_rows=getattr(
                                 adapter, "query_request_max_rows", None
                             ),
@@ -1211,7 +1216,7 @@ class RdfExperimentMatrixResource:
                         "measured_runs": int(policy["measured_runs"]),
                         "timeout_s": float(policy["timeout_s"]),
                         "timeout_mode": "worker",
-                        "correctness_mode": "fingerprint",
+                        "correctness_mode": _correctness_mode(manifest),
                         "manual_skip_rules": _manual_skip_rules(
                             policy, _load_query_manifest(str(manifest_path)), system_id
                         ),

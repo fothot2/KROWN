@@ -38,7 +38,8 @@ READY_QUERY = 'ASK { }'
 class Fuseki(Container):
     """Fuseki container for executing SPARQL queries."""
     def __init__(self, data_path: str, config_path: str, directory: str,
-                 verbose: bool, dataset_mode: str = TDB2_MODE):
+                 verbose: bool, dataset_mode: str = TDB2_MODE,
+                 database_path: str | None = None):
         """Creates an instance of the Fuseki class.
 
         Parameters
@@ -61,14 +62,19 @@ class Fuseki(Container):
         self.command_arguments = _MODE_COMMANDS[dataset_mode]
 
         os.umask(0)
-        os.makedirs(os.path.join(self._data_path, 'fuseki'), exist_ok=True)
+        default_database = Path(self._data_path) / 'fuseki'
+        selected_database = default_database if database_path is None else Path(database_path).expanduser()
+        if not selected_database.is_absolute():
+            raise ValueError('database_path must be absolute')
+        self._database_path = selected_database.resolve()
+        self._database_path.mkdir(parents=True, exist_ok=True)
 
         initial_heap, max_heap = FUSEKI_HEAPS[dataset_mode]
 
         volumes = [f'{self._data_path}/shared:/data']
         if dataset_mode == TDB2_MODE:
             volumes.append(
-                f'{self._data_path}/fuseki:/fuseki/databases/DB'
+                f'{self._database_path}:/fuseki/databases/DB'
             )
         self._volumes = tuple(volumes)
         super().__init__(f'kgconstruct/fuseki:v{VERSION}',
@@ -110,15 +116,15 @@ class Fuseki(Container):
     def reset_store(self) -> bool:
         """Create an empty TDB2 directory before one measured load."""
         data_root = Path(self._data_path).resolve()
-        store = data_root / 'fuseki'
+        store = getattr(
+            self, '_database_path', data_root / 'fuseki'
+        )
         if store.is_symlink():
             self._logger.error('Fuseki database path is a symbolic link')
             return False
         resolved_store = store.resolve()
-        try:
-            resolved_store.relative_to(data_root)
-        except ValueError:
-            self._logger.error('Fuseki database path leaves the data directory')
+        if resolved_store != (data_root / 'fuseki').resolve():
+            self._logger.error('Refusing to reset a non-default Fuseki database path')
             return False
         if resolved_store.exists() and not resolved_store.is_dir():
             self._logger.error('Fuseki database path is not a directory')

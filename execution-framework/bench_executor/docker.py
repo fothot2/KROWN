@@ -210,7 +210,6 @@ class Docker():
         if detach:
             cmd += ' --detach'
         cmd += f' --memory {DOCKER_MEMORY} --memory-swap {DOCKER_MEMORY_SWAP}'
-        cmd += ' --memory-swappiness 0'
         for variable, value in environment.items():
             cmd += f' --env "{variable}={value}"'
         for host_port, container_port in ports.items():
@@ -222,11 +221,16 @@ class Docker():
         cmd += f' --network "{network}"'
         cmd += f' {image} {command}'
         self._logger.debug(f'Starting Docker container: {cmd}')
-        status_code, container_id = subprocess.getstatusoutput(cmd)
-        container_id = container_id.strip()
+        completed = subprocess.run(cmd, shell=True, text=True, capture_output=True, check=False)
+        container_id = completed.stdout.strip()
+        if completed.stderr.strip():
+            self._logger.warning(completed.stderr.strip())
+        valid_id = bool(container_id) and all(character in '0123456789abcdef' for character in container_id.lower())
+        if completed.returncode == 0 and not valid_id:
+            self._logger.error(f'Docker returned an invalid container ID: {container_id!r}')
+            return False, ''
         self._logger.debug(f'Container "{container_id}" running')
-
-        return status_code == 0, container_id
+        return completed.returncode == 0, container_id
 
     def create_network(self, network: str) -> bool:
         """Create a Docker container network.
