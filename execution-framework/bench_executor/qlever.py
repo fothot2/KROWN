@@ -45,7 +45,7 @@ class QLever:
 
     def __init__(self, data_path: str, directory: str, verbose: bool,
                  image: str, index_command: str, server_command: str,
-                 port: int = 7001):
+                 port: int = 7001, index_path: str | None = None):
         if not isinstance(image, str) or not image.strip() or ':' not in image:
             raise ValueError('image must be a non-empty pinned image reference')
         if image.rsplit(':', 1)[1] == 'latest':
@@ -57,6 +57,15 @@ class QLever:
         if not isinstance(port, int) or isinstance(port, bool) or not 1 <= port <= 65535:
             raise ValueError('port must be an integer from 1 to 65535')
         self._data_path = Path(data_path).resolve()
+        default_index = self._data_path / 'qlever-index'
+        selected_index = (
+            default_index if index_path is None
+            else Path(index_path).expanduser()
+        )
+        if not selected_index.is_absolute():
+            raise ValueError('index_path must be absolute')
+        self._index_path = selected_index.resolve()
+        self._index_path.mkdir(parents=True, exist_ok=True)
         self._directory = Path(directory).resolve()
         self._logger = Logger(__name__, str(self._directory), verbose)
         self._image = image
@@ -64,8 +73,7 @@ class QLever:
         tuning = (
             f' --memory-max-size {QLEVER_QUERY_MEMORY}'
             f' --cache-max-size {QLEVER_CACHE_MEMORY}'
-            f' --num-simultaneous-queries {QLEVER_SIMULTANEOUS_QUERIES}'
-            f' --num-threads {QLEVER_THREADS}'
+            f' -j {QLEVER_SIMULTANEOUS_QUERIES}'
         )
         self._server_command = server_command if '--memory-max-size' in server_command else server_command.rstrip(" '") + tuning + ("'" if server_command.rstrip().endswith("'") else "")
         self._port = port
@@ -84,7 +92,10 @@ class QLever:
         indexer = Container(
             self._image, 'qlever_index', self._logger,
             environment={'UID': str(os.getuid()), 'GID': str(os.getgid())},
-            volumes=[f'{self._data_path}:/data'],
+            volumes=[
+                f'{self._data_path}:/data',
+                f'{getattr(self, '_index_path', self._data_path / 'qlever-index')}:/data/qlever-index',
+            ],
             working_directory='/data',
         )
         started_ns = time.perf_counter_ns()
@@ -126,7 +137,9 @@ class QLever:
             self.cleanup_containers()
 
     def _index_size(self) -> dict[str, object]:
-        root = (self._data_path / 'qlever-index').resolve()
+        root = getattr(
+            self, '_index_path', self._data_path / 'qlever-index'
+        ).resolve()
         if not root.is_dir():
             raise FileNotFoundError(f'QLever index directory is missing: {root}')
         logical = allocated = files = directories = excluded_files = 0
@@ -165,7 +178,10 @@ class QLever:
             self._image, 'qlever_server', self._logger,
             ports={str(self._port): str(self._port)},
             environment={'UID': str(os.getuid()), 'GID': str(os.getgid())},
-            volumes=[f'{self._data_path}:/data'],
+            volumes=[
+                f'{self._data_path}:/data',
+                f'{getattr(self, '_index_path', self._data_path / 'qlever-index')}:/data/qlever-index',
+            ],
             working_directory='/data',
         )
         return self._server.run(self._server_command)

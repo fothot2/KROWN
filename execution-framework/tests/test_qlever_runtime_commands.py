@@ -200,5 +200,19 @@ class QLeverRuntimeCommandTests(unittest.TestCase):
         )
 
 
+    def test_server_command_uses_one_supported_concurrency_option(self):
+        source = (
+            Path(__file__).resolve().parents[1]
+            / 'bench_executor'
+            / 'qlever.py'
+        ).read_text(encoding='utf-8')
+
+        self.assertIn(
+            "f' -j {QLEVER_SIMULTANEOUS_QUERIES}'",
+            source,
+        )
+        self.assertNotIn('--num-simultaneous-queries', source)
+        self.assertNotIn('--num-threads', source)
+
 if __name__ == "__main__":
     unittest.main()
