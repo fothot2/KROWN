@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """Run canonical SPARQL SELECT and ASK workloads over HTTP."""
 
+import codecs
+import json
 import multiprocessing as mp
 import os
+import re
 import time
 
 import requests
@@ -93,11 +96,108 @@ def _normalize_graph_response(body: bytes, media_type: str) -> dict:
 
 
 
+_BINDINGS_PREFIX = re.compile(r'"bindings"\s*:\s*\[')
+_MAX_JSON_PREFIX_CHARS = 1024 * 1024
+
+
+def _count_select_bindings(chunks) -> tuple[int, int]:
+    """Count complete top-level binding objects with bounded retained text."""
+    decoder = codecs.getincrementaldecoder('utf-8')()
+    buffer = ''
+    found = False
+    count = 0
+    response_bytes = 0
+    in_string = False
+    escaped = False
+    object_depth = 0
+    array_depth = 0
+    saw_value = False
+    finished = False
+    for raw in chunks:
+        response_bytes += len(raw)
+        text = decoder.decode(raw)
+        if not found:
+            buffer += text
+            match = _BINDINGS_PREFIX.search(buffer)
+            if match is None:
+                if len(buffer) > _MAX_JSON_PREFIX_CHARS:
+                    raise ValueError('SPARQL JSON bindings prefix exceeds limit')
+                continue
+            text = buffer[match.end():]
+            buffer = ''
+            found = True
+        for character in text:
+            if finished:
+                continue
+            if in_string:
+                if escaped:
+                    escaped = False
+                elif character == '\\':
+                    escaped = True
+                elif character == '"':
+                    in_string = False
+                continue
+            if character == '"':
+                in_string = True
+            elif character == '{':
+                object_depth += 1
+                saw_value = True
+            elif character == '}':
+                if object_depth == 0:
+                    raise ValueError('invalid SPARQL binding object')
+                object_depth -= 1
+                if object_depth == 0 and array_depth == 0:
+                    count += 1
+            elif character == '[':
+                array_depth += 1
+            elif character == ']':
+                if object_depth == 0 and array_depth == 0:
+                    finished = True
+                elif array_depth == 0:
+                    raise ValueError('invalid SPARQL binding array')
+                else:
+                    array_depth -= 1
+            elif (not character.isspace() and character != ','
+                  and object_depth == 0 and array_depth == 0):
+                saw_value = True
+                raise ValueError('SPARQL SELECT binding must be an object')
+    tail = decoder.decode(b'', final=True)
+    if tail:
+        raise ValueError('unexpected buffered UTF-8 tail')
+    if not found or not finished or in_string or object_depth or array_depth:
+        raise ValueError('incomplete SPARQL JSON SELECT response')
+    if saw_value and count == 0:
+        raise ValueError('invalid SPARQL JSON SELECT response')
+    return count, response_bytes
+
+
+def _count_ntriples(chunks) -> tuple[int, int]:
+    """Count complete non-empty N-Triples lines without retaining the graph."""
+    pending = b''
+    count = 0
+    response_bytes = 0
+    for raw in chunks:
+        response_bytes += len(raw)
+        pending += raw
+        lines = pending.split(b'\n')
+        pending = lines.pop()
+        for line in lines:
+            stripped = line.strip()
+            if stripped and not stripped.startswith(b'#'):
+                count += 1
+        if len(pending) > 16 * 1024 * 1024:
+            raise ValueError('N-Triples response line exceeds 16 MiB')
+    stripped = pending.strip()
+    if stripped and not stripped.startswith(b'#'):
+        count += 1
+    return count, response_bytes
+
+
 def _count_http_result_worker(connection, endpoint, query, system, request_max_rows):
-    """Execute and fully materialize one HTTP result in a killable process."""
+    """Stream and count one complete HTTP result in a killable process."""
     try:
         result_type = classify_query(query).result_type
-        accept = ('application/n-triples, text/turtle;q=0.9'
+        accept = ('application/n-triples'
                   if result_type in {'construct', 'describe'}
                   else 'application/sparql-results+json')
         data = {'query': query}
@@ -106,39 +206,49 @@ def _count_http_result_worker(connection, endpoint, query, system, request_max_r
         if system == _VIRTUOSO_SYSTEM:
             data['default-graph-uri'] = _VIRTUOSO_DEFAULT_GRAPH
         started_ns = time.perf_counter_ns()
-        response = requests.post(endpoint, data=data, headers={'Accept': accept}, timeout=None)
-        body = response.content
-        execute_ns = time.perf_counter_ns() - started_ns
+        response = requests.post(
+            endpoint, data=data, headers={'Accept': accept},
+            timeout=None, stream=True,
+        )
+        headers_ns = time.perf_counter_ns() - started_ns
         response.raise_for_status()
-        count_started_ns = time.perf_counter_ns()
+        consume_started_ns = time.perf_counter_ns()
         content_type = response.headers.get('Content-Type', '')
         media_type = content_type.split(';', 1)[0].strip().lower()
-        if media_type in {'application/sparql-results+json', 'application/json'}:
-            document = response.json()
-            if 'boolean' in document:
-                if not isinstance(document['boolean'], bool):
-                    raise ValueError('SPARQL ASK boolean must be true or false')
-                result_count = 1 if document['boolean'] else 0
-                result_kind = 'ask'
-            else:
-                bindings = document.get('results', {}).get('bindings')
-                if not isinstance(bindings, list):
-                    raise ValueError('SPARQL SELECT bindings must be an array')
-                result_count = len(bindings)
-                result_kind = 'select'
+        chunks = response.iter_content(chunk_size=64 * 1024)
+        if result_type == 'ask':
+            body = b''.join(chunks)
+            if len(body) > _MAX_JSON_PREFIX_CHARS:
+                raise ValueError('SPARQL ASK response exceeds 1 MiB')
+            response_bytes = len(body)
+            document = json.loads(body)
+            if not isinstance(document.get('boolean'), bool):
+                raise ValueError('SPARQL ASK boolean must be true or false')
+            result_count = 1 if document['boolean'] else 0
+            result_kind = 'ask'
+        elif result_type == 'select':
+            if media_type not in {'application/sparql-results+json', 'application/json'}:
+                raise ValueError(f'Unsupported SPARQL SELECT response type: {media_type!r}')
+            result_count, response_bytes = _count_select_bindings(chunks)
+            result_kind = 'select'
         else:
-            rdf_format = _GRAPH_MEDIA_TYPES.get(media_type)
-            if rdf_format is None:
-                raise RuntimeError(f'Unsupported SPARQL HTTP response type: {media_type!r}')
-            graph = Graph(); graph.parse(data=body, format=rdf_format)
-            result_count = len(graph); result_kind = 'graph'
-        count_ns = time.perf_counter_ns() - count_started_ns
-        connection.send({'status':'ok','result_count':result_count,'execute_ns':execute_ns,
-                         'count_ns':count_ns,'response_bytes':len(body),
-                         'http_status':response.status_code,'result_kind':result_kind})
+            if media_type not in {'application/n-triples', 'text/plain'}:
+                raise ValueError(f'Unsupported streaming graph response type: {media_type!r}')
+            result_count, response_bytes = _count_ntriples(chunks)
+            result_kind = 'graph'
+        consume_ns = time.perf_counter_ns() - consume_started_ns
+        connection.send({
+            'status': 'ok', 'result_count': result_count,
+            'headers_ns': headers_ns, 'consume_ns': consume_ns,
+            'response_bytes': response_bytes,
+            'http_status': response.status_code, 'result_kind': result_kind,
+        })
     except BaseException as error:
-        try: connection.send({'status':'error','error_type':type(error).__name__,'error_message':str(error)})
-        except (BrokenPipeError, OSError): pass
+        try:
+            connection.send({'status': 'error', 'error_type': type(error).__name__,
+                             'error_message': str(error)})
+        except (BrokenPipeError, OSError):
+            pass
     finally:
         connection.close()
 
@@ -221,17 +331,28 @@ class _SparqlHttpAdapter(_RdfQueryAdapter):
             if message.get('status') != 'ok':
                 raise RuntimeError(f"{message.get('error_type')}: {message.get('error_message')}")
             attempt_ns = time.perf_counter_ns() - attempt_started_ns
-            execute_ns = int(message['execute_ns']); count_ns = int(message['count_ns'])
-            return _QueryOutcome(result_count=int(message['result_count']),
-                result_fingerprint=None, elapsed_ns=execute_ns,
-                metadata={'measurement_boundary':'sparql-http-complete-response-count-only',
-                    'comparison_mode':'count-only','http_status':message['http_status'],
-                    'response_bytes':message['response_bytes'],'result_kind':message['result_kind'],
-                    'request_max_rows':self._request_max_rows,
-                    'result_cap_requested':self._request_max_rows is not None},
-                stage_timings_ns={'engine_execute_and_transfer':execute_ns,
-                    'result_materialize_and_count':count_ns,
-                    'worker_dispatch':max(0, attempt_ns-execute_ns-count_ns)})
+            headers_ns = int(message['headers_ns'])
+            consume_ns = int(message['consume_ns'])
+            return _QueryOutcome(
+                result_count=int(message['result_count']),
+                result_fingerprint=None,
+                elapsed_ns=attempt_ns,
+                metadata={
+                    'measurement_boundary': 'complete-result-consumption',
+                    'comparison_mode': 'count-only',
+                    'http_status': message['http_status'],
+                    'response_bytes': message['response_bytes'],
+                    'result_kind': message['result_kind'],
+                    'streaming_result_count': True,
+                    'request_max_rows': self._request_max_rows,
+                    'result_cap_requested': self._request_max_rows is not None,
+                },
+                stage_timings_ns={
+                    'request_until_response_headers': headers_ns,
+                    'response_stream_parse_and_count': consume_ns,
+                    'worker_dispatch': max(0, attempt_ns - headers_ns - consume_ns),
+                },
+            )
         started_ns = time.perf_counter_ns()
         try:
             response = self._session.post(

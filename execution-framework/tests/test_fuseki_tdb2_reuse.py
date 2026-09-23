@@ -12,4 +12,6 @@ class Tests(unittest.TestCase):
     runtime=cls.return_value;runtime.wait_until_ready.return_value=True;runtime.stop.return_value=True
     adapter=FusekiSystemAdapter(artifact,str(root),str(root),str(root),dataset_mode='tdb2',lifecycle_mode=REUSE_MODE,reuse_store_path=str(store),reuse_receipt_path=str(receipt));self.assertTrue(adapter.prepare());adapter.memory_sampler=MagicMock();self.assertTrue(adapter.start());self.assertTrue(adapter.ready());self.assertTrue(adapter.stop())
    runtime.reset_store.assert_not_called();runtime.load.assert_not_called();cls.assert_called_once();self.assertEqual(cls.call_args.kwargs['database_path'],str(store.resolve()))
+   with patch('bench_executor.fuseki_system_adapter._sha256', side_effect=AssertionError('source hash must not run')):
+    adapter=FusekiSystemAdapter(artifact,str(root),str(root),str(root),dataset_mode='tdb2',lifecycle_mode=REUSE_MODE,reuse_store_path=str(store),reuse_receipt_path=str(receipt));self.assertTrue(adapter.prepare())
 if __name__=='__main__':unittest.main()

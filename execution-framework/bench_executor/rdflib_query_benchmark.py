@@ -107,7 +107,7 @@ class _RdfLibAdapter(_RdfQueryAdapter):
         elapsed_ns = execute_ns + materialize_ns
         correctness_started_ns = time.perf_counter_ns()
         metadata = {
-            'measurement_boundary': 'rdflib-full-result-materialization',
+            'measurement_boundary': 'complete-result-consumption',
         }
         fingerprint = None
         metadata['comparison_mode'] = self._correctness_mode

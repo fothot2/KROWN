@@ -117,14 +117,16 @@ class FusekiSystemAdapter(SparqlHttpSystemAdapter):
             source.relative_to(shared)
         except ValueError:
             return False
-        if not source.is_file():
-            return False
-        if source.stat().st_size != self._rdf_file.size_bytes:
-            return False
-        if _sha256(source) != self._rdf_file.sha256:
-            return False
+        lifecycle_mode = getattr(self, '_lifecycle_mode', BUILD_MODE)
+        if lifecycle_mode == BUILD_MODE:
+            if not source.is_file():
+                return False
+            if source.stat().st_size != self._rdf_file.size_bytes:
+                return False
+            if _sha256(source) != self._rdf_file.sha256:
+                return False
         database_path = None
-        if getattr(self, '_lifecycle_mode', BUILD_MODE) == REUSE_MODE:
+        if lifecycle_mode == REUSE_MODE:
             if not self._reuse_receipt.is_file():
                 return False
             try:

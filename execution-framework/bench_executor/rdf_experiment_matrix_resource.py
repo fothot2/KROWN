@@ -663,7 +663,10 @@ _COMPACT_RESULT_FIELDS = (
 def _compact_result_record(record: Mapping[str, Any]) -> dict[str, Any]:
     """Keep common fields and boundary-specific transport provenance."""
     missing = [name for name in _COMPACT_REQUIRED_RESULT_FIELDS if name not in record]
-    if record.get("measurement_boundary") == "sparql-http-complete-response":
+    if record.get("measurement_boundary") in {
+            "sparql-http-complete-response",
+            "complete-result-consumption",
+    }:
         missing.extend(
             name for name in _COMPACT_HTTP_RESULT_FIELDS if name not in record
         )

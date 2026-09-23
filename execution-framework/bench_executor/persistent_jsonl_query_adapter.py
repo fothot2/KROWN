@@ -231,7 +231,7 @@ class PersistentJsonlQueryAdapter(_RdfQueryAdapter):
             }
         }
         metadata["measurement_boundary"] = (
-            "persistent-worker-complete-response"
+            "complete-result-consumption"
         )
         return _QueryOutcome(
             result_count=normalized["result_count"],
