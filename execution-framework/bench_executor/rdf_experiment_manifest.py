@@ -44,6 +44,7 @@ def load_rdf_experiment_declaration(
     path: str | Path,
     benchmark_root: str | Path | None = None,
     selected_systems: Sequence[str] | None = None,
+    verify_artifact_files: bool = True,
 ) -> tuple[tuple[ExperimentSpecification, ...], dict[str, DatasetArtifact]]:
     declaration_path = Path(path).expanduser().resolve()
     root = (
@@ -119,7 +120,8 @@ def load_rdf_experiment_declaration(
         )
     artifacts = {
         identifier: load_dataset_artifact_receipt(
-            str(_contained(root, representations[identifier], "representation receipt"))
+            str(_contained(root, representations[identifier], "representation receipt")),
+            verify_files=verify_artifact_files,
         )
         for identifier in representations
         if identifier in selected_representations

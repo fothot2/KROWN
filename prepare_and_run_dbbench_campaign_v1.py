@@ -28,6 +28,8 @@ VIRTUOSO_POINTER = SCENARIO / "preserved-virtuoso-path.txt"
 VIRTUOSO_RECEIPT = BENCH_DATA / "virtuoso-store-receipt.json"
 QLEVER_POINTER = SCENARIO / "preserved-qlever-index-path.txt"
 QLEVER_RECEIPT = BENCH_DATA / "qlever-index-receipt.json"
+OXIGRAPH_POINTER = SCENARIO / "preserved-oxigraph-rocksdb-path.txt"
+OXIGRAPH_RECEIPT = BENCH_DATA / "oxigraph-rocksdb-store-receipt.json"
 
 VALIDATION_GATE_CAMPAIGN_ID = 'dbbench-dbpedia-vortex-gate-20260921T185447Z'
 
@@ -224,6 +226,37 @@ def prepare_qlever_receipt() -> tuple[Path, Path]:
         ),
     })
     return index, QLEVER_RECEIPT
+
+
+def prepare_oxigraph_receipt() -> tuple[Path, Path]:
+    if not OXIGRAPH_POINTER.is_file():
+        raise FileNotFoundError(
+            "Oxigraph RocksDB reuse requires " + str(OXIGRAPH_POINTER)
+        )
+    store = Path(OXIGRAPH_POINTER.read_text().strip()).resolve()
+    if not store.is_dir():
+        raise FileNotFoundError(store)
+    metadata_path = store / ".krown-oxigraph-store.json"
+    metadata = read_json(metadata_path)
+    if metadata.get("schema") != "oxigraph-rocksdb-build-metadata-v1":
+        raise ValueError("invalid Oxigraph RocksDB build metadata")
+    current = store / "CURRENT"
+    if not current.is_file() or current.stat().st_size <= 0:
+        raise RuntimeError("Oxigraph RocksDB CURRENT marker is missing")
+    if not any(path.is_file() and path.stat().st_size > 0 for path in store.rglob("*.sst")):
+        raise RuntimeError("Oxigraph RocksDB store has no SST files")
+    source = read_json(BENCH_DATA / "rdf-source-receipt.json")
+    if metadata.get("source_sha256") != source["source"]["sha256"]:
+        raise ValueError("Oxigraph RocksDB source identity differs")
+    atomic_json(OXIGRAPH_RECEIPT, {
+        "schema": "oxigraph-rocksdb-store-receipt-v1",
+        "representation": "oxigraph/rocksdb-store",
+        "source_sha256": source["source"]["sha256"],
+        "source_size_bytes": source["source"]["size_bytes"],
+        "graph_triple_count": metadata["graph_triple_count"],
+        "store_path": str(store),
+    })
+    return store, OXIGRAPH_RECEIPT
 
 def validated_invalid_source_queries() -> tuple[set[str], list[dict[str, Any]]]:
     """Return the deterministic invalid source-query set from the 3-run gate."""
@@ -506,6 +539,11 @@ def main() -> int:
     parser.add_argument(
         "--qlever-mode", choices=("build", "reuse"), default="reuse"
     )
+    parser.add_argument(
+        "--oxigraph-rocksdb-mode",
+        choices=("build", "reuse"),
+        default="reuse",
+    )
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
@@ -534,6 +572,13 @@ def main() -> int:
     )
     if qlever_selected and args.qlever_mode == 'reuse':
         qlever_index, qlever_receipt = prepare_qlever_receipt()
+    oxigraph_store = oxigraph_receipt = None
+    oxigraph_selected = (
+        not args.system
+        or "oxigraph/rocksdb" in args.system
+    )
+    if oxigraph_selected and args.oxigraph_rocksdb_mode == "reuse":
+        oxigraph_store, oxigraph_receipt = prepare_oxigraph_receipt()
     if args.prepare_only:
         print("DBBENCH CAMPAIGN PREPARATION OK")
         print(f"declaration={declaration_path}")
@@ -585,8 +630,25 @@ def main() -> int:
     if qlever_selected and args.qlever_mode == 'reuse':
         environment["KROWN_QLEVER_REUSE_PATH"] = str(qlever_index)
         environment["KROWN_QLEVER_RECEIPT"] = str(qlever_receipt)
+    environment["KROWN_OXIGRAPH_ROCKSDB_MODE"] = args.oxigraph_rocksdb_mode
+    environment.setdefault("KROWN_OXIGRAPH_BUILD_TIMEOUT_S", "10800")
+    if oxigraph_selected and args.oxigraph_rocksdb_mode == "reuse":
+        environment["KROWN_OXIGRAPH_ROCKSDB_REUSE_PATH"] = str(oxigraph_store)
+        environment["KROWN_OXIGRAPH_ROCKSDB_RECEIPT"] = str(oxigraph_receipt)
     environment.setdefault("KROWN_RDFLIB_STARTUP_TIMEOUT_S", "1800")
-    return subprocess.run(command, cwd=KROWN, env=environment, check=False).returncode
+    completed = subprocess.run(
+        command,
+        cwd=KROWN,
+        env=environment,
+        check=False,
+    )
+    if completed.returncode != 0:
+        return completed.returncode
+    final_summary = DATA / "campaigns" / args.campaign_id / "final-summary.json"
+    if not final_summary.is_file():
+        return 1
+    final = read_json(final_summary)
+    return 0 if final.get("all_systems_reportable") is True else 1
 
 
 if __name__ == "__main__":

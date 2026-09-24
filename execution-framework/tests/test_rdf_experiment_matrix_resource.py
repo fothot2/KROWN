@@ -2,6 +2,7 @@
 import hashlib
 import inspect
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -51,6 +52,129 @@ class RdfExperimentMatrixResourceTests(unittest.TestCase):
             artifact=DatasetArtifact('sample','tiny','binary',7,'a'*64,'custom/default',(ArtifactFile('artifact.bin',7,digest),))
             staged=_stage_artifacts(path,{'custom/default':artifact},shared,benchmark_root=root)['custom/default']; target=shared/staged.files[0].path
             self.assertEqual(target.read_bytes(),b'payload'); self.assertTrue(source.is_file())
+
+    def test_stage_artifacts_skips_hash_for_existing_same_inode(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / 'Suite'
+            experiments = root / 'experiments'
+            data = root / 'data'
+            shared = Path(directory) / 'shared'
+            experiments.mkdir(parents=True)
+            data.mkdir()
+            shared.mkdir()
+            payload = b'payload'
+            source = data / 'artifact.bin'
+            source.write_bytes(payload)
+            digest = hashlib.sha256(payload).hexdigest()
+            (data / 'receipt.json').write_text(json.dumps({
+                'files': [{'path': 'artifact.bin'}]
+            }))
+            declaration = experiments / 'run.json'
+            declaration.write_text(json.dumps({
+                'representations': {'custom/default': 'data/receipt.json'}
+            }))
+            artifact = DatasetArtifact(
+                'sample', 'tiny', 'binary', len(payload), 'a' * 64,
+                'custom/default',
+                (ArtifactFile('artifact.bin', len(payload), digest),),
+            )
+            target = shared / 'rdf-matrix-artifacts/custom--default--0.bin'
+            target.parent.mkdir(parents=True)
+            os.link(source, target)
+            with patch(
+                'bench_executor.rdf_experiment_matrix_resource._sha256'
+            ) as hash_file:
+                staged = _stage_artifacts(
+                    declaration,
+                    {'custom/default': artifact},
+                    shared,
+                    benchmark_root=root,
+                )
+            hash_file.assert_not_called()
+            self.assertTrue(source.samefile(target))
+            self.assertEqual(staged['custom/default'].files[0].sha256, digest)
+
+    def test_stage_artifacts_hashes_source_once_for_new_hard_link(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / 'Suite'
+            experiments = root / 'experiments'
+            data = root / 'data'
+            shared = Path(directory) / 'shared'
+            experiments.mkdir(parents=True)
+            data.mkdir()
+            shared.mkdir()
+            payload = b'payload'
+            source = data / 'artifact.bin'
+            source.write_bytes(payload)
+            digest = hashlib.sha256(payload).hexdigest()
+            (data / 'receipt.json').write_text(json.dumps({
+                'files': [{'path': 'artifact.bin'}]
+            }))
+            declaration = experiments / 'run.json'
+            declaration.write_text(json.dumps({
+                'representations': {'custom/default': 'data/receipt.json'}
+            }))
+            artifact = DatasetArtifact(
+                'sample', 'tiny', 'binary', len(payload), 'a' * 64,
+                'custom/default',
+                (ArtifactFile('artifact.bin', len(payload), digest),),
+            )
+            with patch(
+                'bench_executor.rdf_experiment_matrix_resource._sha256',
+                wraps=lambda path: hashlib.sha256(path.read_bytes()).hexdigest(),
+            ) as hash_file:
+                staged = _stage_artifacts(
+                    declaration,
+                    {'custom/default': artifact},
+                    shared,
+                    benchmark_root=root,
+                )
+            self.assertEqual(hash_file.call_count, 1)
+            target = shared / staged['custom/default'].files[0].path
+            self.assertTrue(source.samefile(target))
+
+    def test_stage_artifacts_hashes_copied_target(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / 'Suite'
+            experiments = root / 'experiments'
+            data = root / 'data'
+            shared = Path(directory) / 'shared'
+            experiments.mkdir(parents=True)
+            data.mkdir()
+            shared.mkdir()
+            payload = b'payload'
+            source = data / 'artifact.bin'
+            source.write_bytes(payload)
+            digest = hashlib.sha256(payload).hexdigest()
+            (data / 'receipt.json').write_text(json.dumps({
+                'files': [{'path': 'artifact.bin'}]
+            }))
+            declaration = experiments / 'run.json'
+            declaration.write_text(json.dumps({
+                'representations': {'custom/default': 'data/receipt.json'}
+            }))
+            artifact = DatasetArtifact(
+                'sample', 'tiny', 'binary', len(payload), 'a' * 64,
+                'custom/default',
+                (ArtifactFile('artifact.bin', len(payload), digest),),
+            )
+            with patch(
+                'bench_executor.rdf_experiment_matrix_resource.os.link',
+                side_effect=OSError('cross-device'),
+            ), patch(
+                'bench_executor.rdf_experiment_matrix_resource._sha256',
+                wraps=lambda path: hashlib.sha256(path.read_bytes()).hexdigest(),
+            ) as hash_file:
+                staged = _stage_artifacts(
+                    declaration,
+                    {'custom/default': artifact},
+                    shared,
+                    benchmark_root=root,
+                )
+            self.assertEqual(hash_file.call_count, 2)
+            target = shared / staged['custom/default'].files[0].path
+            self.assertFalse(source.samefile(target))
+
 
     def test_compact_result_keeps_only_useful_fields(self):
         record = {

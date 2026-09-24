@@ -11,7 +11,7 @@ def _sha(path: Path)->str:
  with path.open("rb") as f:
   for block in iter(lambda:f.read(1024*1024),b""): d.update(block)
  return d.hexdigest()
-def load_dataset_artifact_receipt(path: str)->DatasetArtifact:
+def load_dataset_artifact_receipt(path: str, verify_files: bool = True)->DatasetArtifact:
  receipt_path=Path(path).expanduser().resolve(); root=receipt_path.parent
  value=json.loads(receipt_path.read_text(encoding="utf-8"))
  if not isinstance(value,dict) or value.get("schema")!="rdf-representation-receipt-v1": raise ValueError("Unsupported representation receipt")
@@ -26,6 +26,7 @@ def load_dataset_artifact_receipt(path: str)->DatasetArtifact:
   target=(root/relative).resolve()
   try: target.relative_to(root)
   except ValueError as error: raise ValueError("Receipt file path escapes its directory") from error
-  if not target.is_file() or target.stat().st_size!=item["size_bytes"] or _sha(target)!=item["sha256"]: raise ValueError(f"Representation file differs from receipt: {relative.as_posix()}")
+  if not target.is_file() or target.stat().st_size!=item["size_bytes"]: raise ValueError(f"Representation file differs from receipt: {relative.as_posix()}")
+  if verify_files and _sha(target)!=item["sha256"]: raise ValueError(f"Representation file differs from receipt: {relative.as_posix()}")
   files.append(ArtifactFile(relative.as_posix(),item["size_bytes"],item["sha256"]))
  return DatasetArtifact(benchmark=value["benchmark"],dataset=value["dataset"],source_format=source["format"],source_size_bytes=source["size_bytes"],source_sha256=source["sha256"],representation=value["representation"],files=tuple(files),producer=value["producer"])

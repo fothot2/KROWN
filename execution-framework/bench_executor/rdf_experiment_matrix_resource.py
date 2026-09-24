@@ -167,6 +167,7 @@ def _runtime_preflight(
     experiments, artifacts = load_rdf_experiment_declaration(
         declaration_path, benchmark_root=benchmark_root,
         selected_systems=selected_systems,
+        verify_artifact_files=False,
     )
     bindings = declaration_value.get("bindings")
     declared_systems = (
@@ -383,11 +384,7 @@ def _stage_artifacts(
                 raise ValueError(
                     "representation file escapes its receipt directory"
                 ) from error
-            if (
-                not source.is_file()
-                or source.stat().st_size != declared.size_bytes
-                or _sha256(source) != declared.sha256
-            ):
+            if not source.is_file() or source.stat().st_size != declared.size_bytes:
                 raise ValueError(f"representation file differs from receipt: {source}")
             if representation == "hdt/default":
                 expected = ["dataset.hdt", "dataset.hdt.index.v1-1"]
@@ -406,16 +403,38 @@ def _stage_artifacts(
                 target.relative_to(shared.resolve())
             except ValueError as error:
                 raise ValueError("staged artifact escapes data/shared") from error
+
+            same_file = False
+            if target.is_file() and target.stat().st_size == declared.size_bytes:
+                try:
+                    same_file = source.samefile(target)
+                except OSError:
+                    same_file = False
+            if same_file:
+                files.append(ArtifactFile(
+                    relative.as_posix(), declared.size_bytes, declared.sha256
+                ))
+                continue
+
+            if _sha256(source) != declared.sha256:
+                raise ValueError(f"representation file differs from receipt: {source}")
+
             target.unlink(missing_ok=True)
+            hard_linked = False
             try:
                 os.link(source, target)
+                hard_linked = source.samefile(target)
             except OSError:
                 shutil.copy2(source, target)
-            files.append(
-                ArtifactFile(
-                    relative.as_posix(), target.stat().st_size, _sha256(target)
-                )
-            )
+
+            if not target.is_file() or target.stat().st_size != declared.size_bytes:
+                raise ValueError(f"staged representation differs from receipt: {target}")
+            if not hard_linked and _sha256(target) != declared.sha256:
+                raise ValueError(f"staged representation differs from receipt: {target}")
+
+            files.append(ArtifactFile(
+                relative.as_posix(), declared.size_bytes, declared.sha256
+            ))
         staged[representation] = DatasetArtifact(
             benchmark=artifact.benchmark,
             dataset=artifact.dataset,
@@ -1054,6 +1073,7 @@ class RdfExperimentMatrixResource:
             experiments, original_artifacts = load_rdf_experiment_declaration(
                 declaration_path, benchmark_root=benchmark_root,
                 selected_systems=selection,
+                verify_artifact_files=False,
             )
             artifact_started_ns = time.perf_counter_ns()
             artifacts = _stage_artifacts(
@@ -1154,6 +1174,11 @@ class RdfExperimentMatrixResource:
                             ),
                         )
                     )
+                    if not lifecycle.success:
+                        raise RuntimeError(
+                            f"system lifecycle failed for {system_id}: "
+                            f"{lifecycle.error}"
+                        )
                     query_lifecycle = benchmark.last_lifecycle_timing
                     if not isinstance(query_lifecycle, dict):
                         raise RuntimeError(
@@ -1194,10 +1219,6 @@ class RdfExperimentMatrixResource:
                     lifecycle_stages_ns["validation"] += (
                         execute_wall_ns - query_classified_ns
                     )
-                    if not lifecycle.success:
-                        raise RuntimeError(
-                            f"system lifecycle failed for {system_id}: {lifecycle.error}"
-                        )
                 elif strategy == "rdflib-worker":
                     query = RdfLibQueryBenchmark(
                         str(self._data_path),

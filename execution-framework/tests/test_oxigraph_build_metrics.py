@@ -48,6 +48,7 @@ class OxigraphBuildMetricsTests(unittest.TestCase):
                 artifact(source), directory, directory, backend
             )
         adapter._oxigraph = runtime.return_value
+        adapter._oxigraph.count_triples.return_value = 1
         adapter.memory_sampler = MagicMock()
         adapter.memory_sampler.snapshot.return_value = memory()
         return adapter
@@ -62,7 +63,7 @@ class OxigraphBuildMetricsTests(unittest.TestCase):
             (store / 'LOCK').write_bytes(b'x')
             (store / 'LOG').write_bytes(b'diagnostic')
             (store / 'LOG.old.1').write_bytes(b'rotated')
-            adapter._oxigraph.load.return_value = True
+            adapter._oxigraph.load_rocksdb_file.return_value = True
             self.assertTrue(adapter.ready())
         self.assertEqual(adapter.build_metrics['status'], 'ok')
         self.assertEqual(adapter.build_metrics['memory']['sample_count'], 4)
@@ -71,7 +72,7 @@ class OxigraphBuildMetricsTests(unittest.TestCase):
         self.assertEqual(adapter.representation_size['file_count'], 2)
         self.assertEqual(
             adapter.representation_size['exclusion_policy']['names'],
-            ['LOCK', 'LOG'],
+            ['LOCK', 'LOG', '.krown-oxigraph-store.json'],
         )
         self.assertEqual(
             adapter.representation_size['exclusion_policy']['prefixes'],
@@ -81,7 +82,7 @@ class OxigraphBuildMetricsTests(unittest.TestCase):
             adapter.representation_size['exclusion_policy']['suffixes'], []
         )
         self.assertEqual(
-            adapter.representation_size['exclusion_policy']['excluded_file_count'], 3
+            adapter.representation_size['exclusion_policy']['excluded_file_count'], 4
         )
 
     def test_memory_load_reports_non_persistent_size(self):
@@ -98,9 +99,19 @@ class OxigraphBuildMetricsTests(unittest.TestCase):
     def test_failed_load_preserves_failed_build_metrics(self):
         with tempfile.TemporaryDirectory() as directory:
             adapter = self.make_adapter(directory, 'rocksdb')
-            adapter._oxigraph.load.return_value = False
-            self.assertFalse(adapter.ready())
+            adapter._oxigraph.load_rocksdb_file.return_value = False
+            adapter._oxigraph.last_load_error = {
+                'error_type': 'ReadTimeout',
+                'error_message': 'timed out',
+                'build_timeout_s': 10800.0,
+            }
+            with self.assertRaisesRegex(RuntimeError, 'Oxigraph RDF import failed'):
+                adapter.ready()
         self.assertEqual(adapter.build_metrics['status'], 'failed')
+        self.assertEqual(
+            adapter.build_metrics['failure']['error_type'],
+            'ReadTimeout',
+        )
         self.assertIsNone(adapter.build_metrics['returncode'])
         self.assertIsNone(adapter.representation_size)
 
@@ -120,7 +131,7 @@ class OxigraphCleanBuildTests(OxigraphBuildMetricsTests):
             adapter._oxigraph.start_server.return_value = True
             self.assertTrue(adapter.start())
         adapter._oxigraph.reset_store.assert_called_once_with()
-        adapter._oxigraph.start_server.assert_called_once_with()
+        adapter._oxigraph.start_server.assert_not_called()
 
     def test_failed_reset_prevents_server_start(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -144,7 +155,7 @@ class OxigraphStableSizeBoundaryTests(OxigraphBuildMetricsTests):
             diagnostic.write_bytes(b'initial')
             (store / 'LOG.old.1').write_bytes(b'rotated')
             (store / 'LOCK').write_bytes(b'')
-            adapter._oxigraph.load.return_value = True
+            adapter._oxigraph.load_rocksdb_file.return_value = True
             self.assertTrue(adapter.ready())
             before = adapter.representation_size
             with diagnostic.open('ab') as stream:
@@ -152,7 +163,9 @@ class OxigraphStableSizeBoundaryTests(OxigraphBuildMetricsTests):
             (store / 'LOG.old.2').write_bytes(b'new rotation')
             after = measure_persistent_paths(
                 [store],
-                excluded_names=['LOCK', 'LOG'],
+                excluded_names=[
+                    'LOCK', 'LOG', '.krown-oxigraph-store.json'
+                ],
                 excluded_prefixes=['LOG.old.'],
             )
         for field in (
@@ -164,7 +177,7 @@ class OxigraphStableSizeBoundaryTests(OxigraphBuildMetricsTests):
             self.assertEqual(before[field], after[field])
         self.assertEqual(before['logical_bytes'], len(b'write-ahead'))
         self.assertEqual(before['file_count'], 1)
-        self.assertEqual(after['exclusion_policy']['excluded_file_count'], 4)
+        self.assertEqual(after['exclusion_policy']['excluded_file_count'], 5)
 
 
 if __name__ == '__main__':
