@@ -1,0 +1,20 @@
+{
+  "benchmark": "watdiv",
+  "benchmark_commit": "c273ecc48aebb01f6bda986b057b9fd0197511dc",
+  "benchmark_repository": "/users/u0182905/benchmarks",
+  "dataset": "watdiv-10m",
+  "declarations": {
+    "full": "/users/u0182905/benchmarks/WatDiv/experiments/watdiv-10m-full.json",
+    "smoke": "/users/u0182905/benchmarks/WatDiv/experiments/watdiv-10m-smoke.json"
+  },
+  "manifests": {
+    "full": "manifests/watdiv-10m-full.json",
+    "smoke": "manifests/watdiv-10m-smoke.json"
+  },
+  "schema": "krown-external-benchmark-scenario-v1",
+  "source": {
+    "path": "/users/u0182905/benchmarks/WatDiv/data/watdiv.10M.nt",
+    "sha256": "7cfe0341d578a677d3b5d562eaaf94d67aff8587d9e0ef3d83cc82765b77cddd",
+    "size_bytes": 1542624409
+  }
+}

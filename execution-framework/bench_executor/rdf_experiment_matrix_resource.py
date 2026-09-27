@@ -693,7 +693,11 @@ def _compact_result_record(record: Mapping[str, Any]) -> dict[str, Any]:
         raise ValueError("result record misses compact fields: " + ", ".join(missing))
     compact = {name: record[name] for name in _COMPACT_RESULT_FIELDS if name in record}
     for name in (
+        "query_sha256",
+        "stream",
         "stream_position",
+        "position",
+        "native_query_id",
         "bsbm_template_id",
         "skip_kind",
         "skip_reason",

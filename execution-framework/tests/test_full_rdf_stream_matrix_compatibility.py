@@ -66,7 +66,35 @@ class FullRdfStreamMatrixCompatibilityTests(unittest.TestCase):
         compact = _compact_result_record(record)
         self.assertEqual(compact["stream_position"], 0)
         self.assertEqual(compact["bsbm_template_id"], "1")
-        self.assertNotIn("query_sha256", compact)
+        self.assertEqual(compact["query_sha256"], "a" * 64)
+
+    def test_compact_result_preserves_watdiv_native_provenance(self):
+        record = {
+            "query_id": "watdiv-10m-test.1-00000",
+            "phase": "measured",
+            "run": 0,
+            "status": "ok",
+            "elapsed_ns": 7,
+            "result_count": 1,
+            "result_fingerprint": "f",
+            "client_elapsed_ns": 7,
+            "attempt_elapsed_ns": 7,
+            "timing_clock": "perf_counter_ns",
+            "timing_schema": "rdf-attempt-timing-v1",
+            "timing_stages_ns": {"dispatch": 7},
+            "timing_stages_sum_ns": 7,
+            "timing_reconciled": True,
+            "measurement_boundary": "test-adapter-complete-result",
+            "query_sha256": "b" * 64,
+            "stream": "test.1",
+            "position": 0,
+            "native_query_id": 17,
+        }
+        compact = _compact_result_record(record)
+        self.assertEqual(compact["query_sha256"], "b" * 64)
+        self.assertEqual(compact["stream"], "test.1")
+        self.assertEqual(compact["position"], 0)
+        self.assertEqual(compact["native_query_id"], 17)
 
     def test_compact_result_accepts_legacy_records_without_stream_metadata(self):
         record = {

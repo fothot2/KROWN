@@ -196,7 +196,7 @@ class RdfExperimentMatrixResourceTests(unittest.TestCase):
             "client_elapsed_ns", "attempt_elapsed_ns",
             "timing_clock", "timing_schema",
             "timing_stages_ns", "timing_stages_sum_ns",
-            "timing_reconciled", "measurement_boundary",
+            "timing_reconciled", "measurement_boundary", "query_sha256",
         })
 
     def test_compact_result_keeps_errors_only_on_failure(self):
