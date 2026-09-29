@@ -3,6 +3,8 @@ import importlib.util,json,tempfile,unittest
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[2];PATH=ROOT/'run_watdiv_10m_measured_campaign_v1.py';SPEC=importlib.util.spec_from_file_location(PATH.stem,PATH);MODULE=importlib.util.module_from_spec(SPEC);SPEC.loader.exec_module(MODULE)
 class Tests(unittest.TestCase):
+ def test_all_fourteen_systems_are_available(self):
+  self.assertEqual(MODULE.SYSTEMS, ('rdflib/default', 'hdt-rdflib/optimized-in-memory', 'comunica/hdt', 'pycottas/default', 'vortex-rdf/dictionary-secondary-by-reference', 'vortex-rdf/dictionary-secondary-by-reference-memory', 'vortex-rdf/dictionary-secondary-by-copy', 'vortex-rdf/dictionary-secondary-by-copy-memory', 'oxigraph/memory', 'fuseki/memory', 'oxigraph/rocksdb', 'fuseki/tdb2', 'virtuoso/default', 'qlever/default'))
  def test_stage_contract(self):
   self.assertEqual(MODULE.STAGES['primary'],('test.1',));self.assertEqual(MODULE.STAGES['extension'],('test.2','test.3','test.4','test.5'));self.assertEqual(MODULE.ACTUAL_BUDGET_S,18000)
  def test_projected_budget_is_disabled(self):

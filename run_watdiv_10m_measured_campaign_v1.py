@@ -6,7 +6,22 @@ from pathlib import Path
 ROOT=Path('/users/u0182905/KROWN');BENCH=Path('/users/u0182905/benchmarks')
 SCENARIO=ROOT/'benchmark-integration/watdiv-10m';SHARED=SCENARIO/'data/shared'
 SOURCE=SHARED/'manifests/watdiv-10m-smoke.json';DECL=BENCH/'WatDiv/experiments/watdiv-10m-smoke.json';BROOT=BENCH/'WatDiv';MATRIX=ROOT/'execution-framework/run_rdf_experiment_matrix.py';PY=Path('/users/u0182905/miniconda3/envs/vortex-rdf/bin/python')
-SYSTEMS=('vortex-rdf/dictionary-secondary-by-reference','pycottas/default','comunica/hdt','hdt-rdflib/optimized-in-memory','fuseki/tdb2','qlever/default')
+SYSTEMS=(
+    'rdflib/default',
+    'hdt-rdflib/optimized-in-memory',
+    'comunica/hdt',
+    'pycottas/default',
+    'vortex-rdf/dictionary-secondary-by-reference',
+    'vortex-rdf/dictionary-secondary-by-reference-memory',
+    'vortex-rdf/dictionary-secondary-by-copy',
+    'vortex-rdf/dictionary-secondary-by-copy-memory',
+    'oxigraph/memory',
+    'fuseki/memory',
+    'oxigraph/rocksdb',
+    'fuseki/tdb2',
+    'virtuoso/default',
+    'qlever/default',
+)
 STAGES={'primary':('test.1',),'extension':('test.2','test.3','test.4','test.5'),'all':('test.1','test.2','test.3','test.4','test.5')}
 ACTUAL_BUDGET_S=18000
 
