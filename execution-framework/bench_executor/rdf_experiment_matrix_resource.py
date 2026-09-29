@@ -682,10 +682,7 @@ _COMPACT_RESULT_FIELDS = (
 def _compact_result_record(record: Mapping[str, Any]) -> dict[str, Any]:
     """Keep common fields and boundary-specific transport provenance."""
     missing = [name for name in _COMPACT_REQUIRED_RESULT_FIELDS if name not in record]
-    if record.get("measurement_boundary") in {
-            "sparql-http-complete-response",
-            "complete-result-consumption",
-    }:
+    if record.get("measurement_boundary") == "sparql-http-complete-response":
         missing.extend(
             name for name in _COMPACT_HTTP_RESULT_FIELDS if name not in record
         )
@@ -708,7 +705,8 @@ def _compact_result_record(record: Mapping[str, Any]) -> dict[str, Any]:
         "skip_decision_sha256",
         "skip_evidence_count",
         "skip_timeout_count",
-        "skip_template_id", "skip_threshold",
+        "skip_template_id", "skip_selector_kind", "skip_selector_value",
+        "skip_threshold",
         "skip_activated_at_attempt",
         "quarantine_probe", "probe_policy_id", "probe_policy_sha256",
         "probe_decision_sha256", "probe_reason", "probe_ordinal",
@@ -911,11 +909,15 @@ def _result_summary(path: Path, experiment, representation: str) -> dict[str, An
         row.get("skip_kind") in {
             "automatic-query-flavour-quarantine",
             "in-run-template-timeout-quarantine",
+            "in-run-selector-timeout-quarantine",
         }
         for row in records
     )
     in_run_skipped = sum(
-        row.get("skip_kind") == "in-run-template-timeout-quarantine"
+        row.get("skip_kind") in {
+            "in-run-template-timeout-quarantine",
+            "in-run-selector-timeout-quarantine",
+        }
         for row in records
     )
     quarantine_probes = sum(row.get("quarantine_probe") is True for row in records)

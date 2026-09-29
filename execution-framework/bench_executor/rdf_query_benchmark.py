@@ -38,6 +38,19 @@ def _bsbm_template_id(query) -> str | None:
     return str(int(match.group(1))) if match is not None else None
 
 
+def _in_run_quarantine_selector(query) -> tuple[str, str] | None:
+    """Return the stable benchmark-specific selector for in-run policy."""
+    native = query.metadata.get('native_query_id')
+    if native is not None:
+        value = str(native).strip()
+        if value:
+            return ('native_query_id', str(int(value)) if value.isdigit() else value)
+    template = _bsbm_template_id(query)
+    if template is not None:
+        return ('bsbm_template_id', template)
+    return None
+
+
 class _QueryTimeoutError(TimeoutError):
     """Report an adapter-enforced query timeout."""
 
@@ -647,16 +660,16 @@ class _RdfQueryBenchmark:
 
             total_attempts = len(attempts)
             failure_count = 0
-            in_run_timeout_counts: dict[str, int] = {}
-            in_run_quarantined: dict[str, dict[str, Any]] = {}
+            in_run_timeout_counts: dict[tuple[str, str], int] = {}
+            in_run_quarantined: dict[tuple[str, str], dict[str, Any]] = {}
             for ordinal, (phase, run, order, query, phase_seed) in enumerate(attempts, 1):
                     record = self._base_record(
                         query, phase, run, order, phase_seed
                     )
-                    template_id = _bsbm_template_id(query)
+                    selector = _in_run_quarantine_selector(query)
                     dynamic_rule = (
-                        None if self._force_include or template_id is None
-                        else in_run_quarantined.get(template_id)
+                        None if self._force_include or selector is None
+                        else in_run_quarantined.get(selector)
                     )
                     if dynamic_rule is not None:
                         record.update({
@@ -670,11 +683,21 @@ class _RdfQueryBenchmark:
                             'timing_stages_sum_ns': 0,
                             'timing_reconciled': True,
                             'measurement_boundary': 'query-skipped-before-adapter-dispatch',
-                            'skip_kind': 'in-run-template-timeout-quarantine',
+                            'skip_kind': (
+                                'in-run-template-timeout-quarantine'
+                                if dynamic_rule['selector_kind'] == 'bsbm_template_id'
+                                else 'in-run-selector-timeout-quarantine'
+                            ),
                             'skip_reason': dynamic_rule['reason'],
                             'skip_policy_id': dynamic_rule['policy_id'],
                             'skip_policy_sha256': dynamic_rule['policy_sha256'],
-                            'skip_template_id': template_id,
+                            'skip_selector_kind': dynamic_rule['selector_kind'],
+                            'skip_selector_value': dynamic_rule['selector_value'],
+                            **(
+                                {'skip_template_id': dynamic_rule['selector_value']}
+                                if dynamic_rule['selector_kind'] == 'bsbm_template_id'
+                                else {}
+                            ),
                             'skip_timeout_count': dynamic_rule['timeout_count'],
                             'skip_threshold': dynamic_rule['threshold'],
                             'skip_activated_at_attempt': dynamic_rule['activated_at_attempt'],
@@ -785,27 +808,36 @@ class _RdfQueryBenchmark:
                     if (
                         phase == 'measured'
                         and record['status'] == 'timeout'
-                        and template_id is not None
+                        and selector is not None
                         and self._in_run_timeout_quarantine_threshold > 0
                         and not self._force_include
                     ):
-                        timeout_count = in_run_timeout_counts.get(template_id, 0) + 1
-                        in_run_timeout_counts[template_id] = timeout_count
+                        timeout_count = in_run_timeout_counts.get(selector, 0) + 1
+                        in_run_timeout_counts[selector] = timeout_count
                         threshold = self._in_run_timeout_quarantine_threshold
-                        if timeout_count >= threshold and template_id not in in_run_quarantined:
-                            policy_id = 'bsbm-100k-in-run-template-timeout-quarantine-v1'
-                            canonical = (
-                                f'{policy_id}|{self._system}|{template_id}|{threshold}'
+                        if timeout_count >= threshold and selector not in in_run_quarantined:
+                            selector_kind, selector_value = selector
+                            policy_id = (
+                                'bsbm-100k-in-run-template-timeout-quarantine-v1'
+                                if selector_kind == 'bsbm_template_id'
+                                else 'rdf-in-run-selector-timeout-quarantine-v1'
                             )
-                            in_run_quarantined[template_id] = {
+                            canonical = (
+                                f'{policy_id}|{self._system}|{selector_kind}|'
+                                f'{selector_value}|{threshold}'
+                            )
+                            in_run_quarantined[selector] = {
                                 'policy_id': policy_id,
                                 'policy_sha256': hashlib.sha256(
                                     canonical.encode('utf-8')
                                 ).hexdigest(),
                                 'reason': (
-                                    f'template reached {threshold} query timeouts '
-                                    f'in the current system execution'
+                                    f'{selector_kind}={selector_value} reached '
+                                    f'{threshold} measured query timeouts in the '
+                                    'current system execution'
                                 ),
+                                'selector_kind': selector_kind,
+                                'selector_value': selector_value,
                                 'timeout_count': timeout_count,
                                 'threshold': threshold,
                                 'activated_at_attempt': ordinal,
