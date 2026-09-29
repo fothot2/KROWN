@@ -521,7 +521,10 @@ class RdfLibQueryBenchmark:
                 automatic_quarantine_rules=(),
                 probe_rules=(),
                 force_include: bool = False,
-                in_run_timeout_quarantine_threshold: int = 0) -> bool:
+                in_run_timeout_quarantine_threshold: int = 0,
+                budget_min_attempts: int = 0,
+                budget_max_projected_wall_s: float = 0.0,
+                budget_max_actual_wall_s: float = 0.0) -> bool:
         """Execute an RDFLib-backed workload and save JSON Lines records."""
         try:
             if engine not in SUPPORTED_ENGINES:
@@ -592,6 +595,9 @@ class RdfLibQueryBenchmark:
                 in_run_timeout_quarantine_threshold=(
                     in_run_timeout_quarantine_threshold
                 ),
+                budget_min_attempts=budget_min_attempts,
+                budget_max_projected_wall_s=budget_max_projected_wall_s,
+                budget_max_actual_wall_s=budget_max_actual_wall_s,
             )
             records = benchmark.run(output_path)
             self.last_lifecycle_timing = benchmark.last_lifecycle_timing

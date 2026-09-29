@@ -643,6 +643,13 @@ def _run_file_backed(
         in_run_timeout_quarantine_threshold=int(
             os.environ.get('KROWN_IN_RUN_TIMEOUT_QUARANTINE_THRESHOLD', '0')
         ),
+        budget_min_attempts=int(os.environ.get('KROWN_RDF_BUDGET_MIN_ATTEMPTS', '0')),
+        budget_max_projected_wall_s=float(
+            os.environ.get('KROWN_RDF_BUDGET_MAX_PROJECTED_WALL_S', '0')
+        ),
+        budget_max_actual_wall_s=float(
+            os.environ.get('KROWN_RDF_BUDGET_MAX_ACTUAL_WALL_S', '0')
+        ),
     )
     benchmark.run(str(output_path))
     if not isinstance(benchmark.last_lifecycle_timing, dict):
@@ -1178,6 +1185,15 @@ class RdfExperimentMatrixResource:
                                     'KROWN_IN_RUN_TIMEOUT_QUARANTINE_THRESHOLD', '0'
                                 )
                             ),
+                            budget_min_attempts=int(
+                                os.environ.get('KROWN_RDF_BUDGET_MIN_ATTEMPTS', '0')
+                            ),
+                            budget_max_projected_wall_s=float(
+                                os.environ.get('KROWN_RDF_BUDGET_MAX_PROJECTED_WALL_S', '0')
+                            ),
+                            budget_max_actual_wall_s=float(
+                                os.environ.get('KROWN_RDF_BUDGET_MAX_ACTUAL_WALL_S', '0')
+                            ),
                         )
                     )
                     if not lifecycle.success:
@@ -1343,7 +1359,12 @@ class RdfExperimentMatrixResource:
                         summary["workload_timing"]["phases"].items()
                     )
                 }
+                budget_status = (
+                    query_lifecycle.get('budget')
+                    if isinstance(query_lifecycle, dict) else None
+                )
                 if (expected_phases is not None
+                        and budget_status is None
                         and actual_phases != expected_phases):
                     raise ValueError(
                         "result phase counts differ from manifest: "
@@ -1352,8 +1373,10 @@ class RdfExperimentMatrixResource:
                 summary["runtime_orchestration"] = binding_runtime_provenance(
                     runtime, probe_rules
                 )
+                summary["budget"] = budget_status
                 summary["status"] = (
-                    "ok" if summary["failure_count"] == 0 else "completed_with_failures"
+                    "budget_exhausted" if budget_status is not None else
+                    ("ok" if summary["failure_count"] == 0 else "completed_with_failures")
                 )
                 _compact_result_file(output_path)
                 validation_ns = time.perf_counter_ns() - validation_started_ns
@@ -1397,7 +1420,13 @@ class RdfExperimentMatrixResource:
                     "reconciled": (sum(system_stages_ns.values()) == total_wall_ns),
                 }
                 summaries.append(summary)
-                if summary["failure_count"]:
+                if summary["status"] == "budget_exhausted":
+                    self.last_outcome = "partial"
+                    self._logger.warning(
+                        f"{system_id} exhausted its runtime budget after "
+                        f"{summary['record_count']} query attempts"
+                    )
+                elif summary["failure_count"]:
                     self.last_outcome = "partial"
                     self._logger.warning(
                         f"{system_id} completed with "
@@ -1410,8 +1439,12 @@ class RdfExperimentMatrixResource:
             )
             archive_path = resolve_shared_path(str(self._shared), output_file, "Output")
             query_failure_count = sum(summary["failure_count"] for summary in summaries)
+            budget_exhausted_count = sum(
+                summary.get("status") == "budget_exhausted" for summary in summaries
+            )
             matrix_status = (
-                "ok" if query_failure_count == 0 else "completed_with_failures"
+                "budget_exhausted" if budget_exhausted_count else
+                ("ok" if query_failure_count == 0 else "completed_with_failures")
             )
             _publish_result_bundle(
                 run_directory,

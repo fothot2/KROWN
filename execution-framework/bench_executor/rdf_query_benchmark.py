@@ -314,7 +314,10 @@ class _RdfQueryBenchmark:
             automatic_quarantine_rules=(),
             probe_rules=(),
             force_include: bool = False,
-            in_run_timeout_quarantine_threshold: int = 0):
+            in_run_timeout_quarantine_threshold: int = 0,
+            budget_min_attempts: int = 0,
+            budget_max_projected_wall_s: float = 0.0,
+            budget_max_actual_wall_s: float = 0.0):
         if not callable(adapter_factory):
             raise TypeError('adapter_factory must be callable')
         for name, value in (
@@ -370,6 +373,21 @@ class _RdfQueryBenchmark:
         self._in_run_timeout_quarantine_threshold = (
             in_run_timeout_quarantine_threshold
         )
+        for name, value in (
+            ('budget_min_attempts', budget_min_attempts),
+            ('budget_max_projected_wall_s', budget_max_projected_wall_s),
+            ('budget_max_actual_wall_s', budget_max_actual_wall_s),
+        ):
+            if not isinstance(value, (int, float)) or isinstance(value, bool) or value < 0:
+                raise ValueError(f'{name} must be a non-negative number')
+        self._budget_min_attempts = int(budget_min_attempts)
+        self._budget_max_projected_wall_ns = int(
+            float(budget_max_projected_wall_s) * 1_000_000_000
+        )
+        self._budget_max_actual_wall_ns = int(
+            float(budget_max_actual_wall_s) * 1_000_000_000
+        )
+        self.last_budget_status: dict[str, Any] | None = None
         self.last_lifecycle_timing: dict[str, Any] | None = None
 
     def _probe_rule(self, query):
@@ -663,6 +681,35 @@ class _RdfQueryBenchmark:
             in_run_timeout_counts: dict[tuple[str, str], int] = {}
             in_run_quarantined: dict[tuple[str, str], dict[str, Any]] = {}
             for ordinal, (phase, run, order, query, phase_seed) in enumerate(attempts, 1):
+                    elapsed_wall_ns = time.perf_counter_ns() - run_started_ns
+                    completed_attempts = len(records)
+                    budget_kind = None
+                    projected_total_ns = None
+                    if (self._budget_max_actual_wall_ns > 0
+                            and elapsed_wall_ns >= self._budget_max_actual_wall_ns):
+                        budget_kind = 'actual-wall-time'
+                    elif (self._budget_max_projected_wall_ns > 0
+                          and completed_attempts >= self._budget_min_attempts
+                          and completed_attempts > 0):
+                        projected_total_ns = (
+                            elapsed_wall_ns * total_attempts // completed_attempts
+                        )
+                        if projected_total_ns >= self._budget_max_projected_wall_ns:
+                            budget_kind = 'projected-wall-time'
+                    if budget_kind is not None:
+                        self.last_budget_status = {
+                            'schema': 'rdf-query-budget-exhaustion-v1',
+                            'status': 'budget_exhausted',
+                            'budget_kind': budget_kind,
+                            'completed_attempt_count': completed_attempts,
+                            'expected_attempt_count': total_attempts,
+                            'elapsed_ns': elapsed_wall_ns,
+                            'projected_total_ns': projected_total_ns,
+                            'minimum_attempts_before_projection': self._budget_min_attempts,
+                            'maximum_projected_wall_ns': self._budget_max_projected_wall_ns,
+                            'maximum_actual_wall_ns': self._budget_max_actual_wall_ns,
+                        }
+                        break
                     record = self._base_record(
                         query, phase, run, order, phase_seed
                     )
@@ -914,6 +961,7 @@ class _RdfQueryBenchmark:
                 'restart_load_or_parse_ns': restart_open_ns,
                 'semantics': 'same-artifact-reopen-in-persistent-benchmark-process',
             },
+            'budget': self.last_budget_status,
             'execution_mode': {
                 'process_temperature': (
                     'warm-process' if self._lifecycle == 'shared'
