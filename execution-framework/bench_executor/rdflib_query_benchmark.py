@@ -125,7 +125,7 @@ class _RdfLibAdapter(_RdfQueryAdapter):
         correctness_ns = time.perf_counter_ns() - correctness_started_ns
         return _QueryOutcome(
             result_count=result_count, result_fingerprint=fingerprint,
-            elapsed_ns=elapsed_ns + correctness_ns, metadata=metadata,
+            elapsed_ns=elapsed_ns, metadata=metadata,
             stage_timings_ns={
                 'engine_execute': execute_ns,
                 'result_materialize': materialize_ns,
