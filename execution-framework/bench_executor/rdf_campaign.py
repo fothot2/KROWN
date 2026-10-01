@@ -12,6 +12,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Mapping, Sequence
@@ -133,6 +134,38 @@ def scoped_matrix_command(command: Sequence[str], unit: str) -> list[str]:
 def scope_oom_killed(unit: str) -> bool:
     value=subprocess.run(["systemctl","--user","show",unit,"--property=Result","--value"],text=True,capture_output=True,check=False)
     return value.returncode==0 and value.stdout.strip()=="oom-kill"
+
+def user_scope_active(unit: str) -> bool:
+    value = subprocess.run(
+        ["systemctl", "--user", "is-active", "--quiet", unit],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
+    )
+    return value.returncode == 0
+
+
+def terminate_user_scope(unit: str, *, grace_s: float = 10.0) -> dict[str, object]:
+    """Terminate all processes in a transient user scope and verify exit."""
+    signals = []
+    for signal_name in ("SIGINT", "SIGTERM", "SIGKILL"):
+        if not user_scope_active(unit):
+            break
+        subprocess.run(
+            ["systemctl", "--user", "kill", "--kill-whom=all",
+             f"--signal={signal_name}", unit],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
+        )
+        signals.append(signal_name)
+        deadline = time.monotonic() + grace_s
+        while user_scope_active(unit) and time.monotonic() < deadline:
+            time.sleep(0.1)
+    subprocess.run(
+        ["systemctl", "--user", "stop", unit],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
+    )
+    remaining = user_scope_active(unit)
+    return {"unit": unit, "signals": signals,
+            "remaining_active": remaining, "terminated": not remaining}
+
 
 def declaration_systems(path: str | Path) -> tuple[str, ...]:
     value = json.loads(Path(path).read_text(encoding="utf-8"))
@@ -307,9 +340,10 @@ class RdfCampaign:
         status = "structural-failure"
         exit_code = None
         detail = None
+        unit = f"krown-rdf-{run_id}-{safe}"[:240]
+        termination = None
         try:
             with log.open("a", encoding="utf-8") as stream:
-                unit = f"krown-rdf-{run_id}-{safe}"[:240]
                 result = self.executor(
                     scoped_matrix_command(self._matrix_command(run_id, system, raw), unit), cwd=Path('/users/u0182905/KROWN'), env=dict(environment),
                     stdout=stream, stderr=subprocess.STDOUT, timeout=self.spec.system_limit_s, check=False,
@@ -343,12 +377,22 @@ class RdfCampaign:
                     if (shared_raw / name).is_file():
                         retain(shared_raw / name, root / name)
         except subprocess.TimeoutExpired:
-            status = "timed-out"
-            detail = f"system limit exceeded: {self.spec.system_limit_s}s"
+            termination = terminate_user_scope(unit)
+            cleanup = cleanup_matrix_containers()
+            status = "timed-out" if termination["terminated"] else "infrastructure-blocked"
+            detail = (f"system limit exceeded: {self.spec.system_limit_s}s; "
+                      f"scope_signals={termination['signals']}; "
+                      f"scope_remaining_active={termination['remaining_active']}; "
+                      f"containers_removed={len(cleanup['containers'])}")
         except KeyboardInterrupt:
-            status = "interrupted"
-            detail = "campaign received an interrupt"
-        row = {"system": system, "state": status, "exit_code": exit_code, "detail": detail, "started_at_utc": started, "finished_at_utc": now()}
+            termination = terminate_user_scope(unit)
+            cleanup = cleanup_matrix_containers()
+            status = "interrupted" if termination["terminated"] else "infrastructure-blocked"
+            detail = ("campaign received an interrupt; "
+                      f"scope_signals={termination['signals']}; "
+                      f"scope_remaining_active={termination['remaining_active']}; "
+                      f"containers_removed={len(cleanup['containers'])}")
+        row = {"system": system, "state": status, "exit_code": exit_code, "detail": detail, "started_at_utc": started, "finished_at_utc": now(), "scope_termination": termination}
         atomic_json(hashes_path, self._hashes(root))
         atomic_json(state_path, row)
         return row
